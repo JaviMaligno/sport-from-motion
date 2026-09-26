@@ -78,7 +78,8 @@ def main(argv: list[str] | None = None) -> None:
         candidates=a.candidates.split(",") if a.candidates else None,
         frames_per_view=a.frames_per_view, image_size=a.image_size, seed=a.seed)))
 
-    r = sub.add_parser("run", help="query a chat model (see backends/chat.py for ids)")
+    r = sub.add_parser("run", help="query a model: chat (backends/chat.py) or typed-decision "
+                                   "(backends/decision.py: jev:, laya:, laya-http:)")
     r.add_argument("--items", required=True)
     r.add_argument("--model", required=True, help="e.g. azure-anthropic:claude-opus-5-5")
     r.add_argument("--condition", required=True)
@@ -86,9 +87,11 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--limit", type=int)
     r.add_argument("--max-tokens", type=int, default=1024)
     r.add_argument("--temperature", type=float, default=0.0)
+    r.add_argument("--state-format", default="text", choices=["text", "json"],
+                   help="typed-decision models only: send the coordinates as text or JSON")
     r.set_defaults(func=lambda a: print(pipeline.run_model(
         a.items, a.model, condition=a.condition, rep=a.repr, limit=a.limit,
-        max_tokens=a.max_tokens, temperature=a.temperature)))
+        max_tokens=a.max_tokens, temperature=a.temperature, state_format=a.state_format)))
 
     b = sub.add_parser("baseline", help="nuisance / tempo / kinematic feature classifiers")
     b.add_argument("--items", required=True)

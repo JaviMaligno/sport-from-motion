@@ -87,9 +87,21 @@ Mismas variables que `experiments/judge-bias`; ver [`.env.example`](.env.example
 | `azure-openai:<deployment>` | GPT/Grok, `/openai/v1/chat/completions` | `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_KEY` |
 | `azure-foundry:<deployment>` | Llama, Mistral, Qwen..., `/models/chat/completions` | `AZURE_FOUNDRY_ENDPOINT` + `AZURE_FOUNDRY_KEY` |
 | `openai:` / `anthropic:` | APIs directas | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` |
+| `jev:<model>` | Jev (TypeSafe), `POST /v1/systemone`. Solo `--repr text` | `TYPESAFE_API_KEY` (+ `TYPESAFE_BASE_URL`) |
+| `laya-http:<checkpoint>` | Laya tras `laya-serve` (mismo protocolo; local o contenedor en Azure) | `LAYA_BASE_URL` (+ `LAYA_API_KEY`) |
+| `laya:<checkpoint>` | Laya en proceso (`pip install -e ".[laya]"`) | `LAYA_MAX_LEN` (8192 por defecto) |
 | `dummy:first` / `dummy:uniform` | sin red | — |
 
 `<deployment>` es el nombre del despliegue en Foundry (por defecto, el id del modelo).
+Jev y Laya son modelos de decisión tipada: reciben las coordenadas como texto
+(`--state-format text`) o JSON (`--state-format json`) y devuelven una probabilidad por
+deporte. Checkpoints de Laya: `english` (512 tokens, se queda corto),
+`multilingual` (hasta 8.192) y `typed-decisions`.
+
+```bash
+motion-sport run --items runs/pilot-strict --model jev:jev-latest --condition motion --repr text
+motion-sport run --items runs/pilot-strict --model laya:multilingual --condition motion --repr text --state-format json
+```
 
 ## Mapa del código
 
@@ -103,6 +115,7 @@ src/motion_sport/
   serialize.py     la misma vista como texto
   prompts.py       prompt de opciones cerradas (barajadas por ítem) y parseo de la respuesta
   backends/chat.py VLM por Azure y APIs directas (solo stdlib)
+  backends/decision.py  Jev / Laya (protocolo /v1/systemone o Laya en proceso)
   backends/probe.py  encoder de vídeo congelado (V-JEPA 2 / VideoMAE) + probe logístico
   baselines.py     clasificadores de atajos (nuisance, tempo) y cinemático
   evaluate.py      métricas, bootstrap agrupado por partido, contrastes emparejados

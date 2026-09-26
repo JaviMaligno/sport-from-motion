@@ -22,10 +22,10 @@ import numpy as np
 
 from motion_sport.conditions import build_view
 from motion_sport.controls import PRESETS, apply_controls, median_speed
-from motion_sport.prompts import build_prompt, parse_answer
+from motion_sport.prompts import build_decision, build_prompt, parse_answer
 from motion_sport.render import auto_extent, contact_sheet, render_points, save_gif
 from motion_sport.schema import Clip, load_clips
-from motion_sport.serialize import view_to_text
+from motion_sport.serialize import view_to_state, view_to_text
 
 # which representations make sense for which condition
 VALID = {
@@ -136,13 +136,19 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                 prompt_repr = {"sheet": "image", "frames": "image", "gif": "image"}.get(rep, rep)
                 prompt, order = build_prompt(view, prompt_repr, cands,
                                              seed=stable_seed(c.clip_id, cond, rep), text_payload=text)
-                items.append({
+                item = {
                     "item_id": f"{c.clip_id}__{cond}__{rep}", "clip_id": c.clip_id,
                     "sport": c.sport, "source": c.source, "match_id": c.match_id,
                     "tags": c.tags, "condition": cond, "repr": rep,
                     "files": [str(pathlib.Path(f).relative_to(out)) for f in files],
                     "prompt": prompt, "options": order, "frame_order": view.order,
-                })
+                }
+                if rep == "text":  # typed-decision models (Jev, Laya) read these fields
+                    instr, criteria = build_decision(view, cands,
+                                                     seed=stable_seed(c.clip_id, cond, rep))
+                    item.update(decision_instructions=instr, decision_criteria=criteria,
+                                state_text=text, state_json=view_to_state(view))
+                items.append(item)
     in_by_sport = Counter(c.sport for c in raw)
     for sport, n_in in in_by_sport.items():
         if kept_by_sport[sport] < 0.5 * n_in:
@@ -192,19 +198,32 @@ def _pred_path(items_dir, name: str, condition: str, rep: str) -> pathlib.Path:
 
 def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
               limit: int | None = None, max_tokens: int = 1024, temperature: float = 0.0,
-              complete=None) -> pathlib.Path:
-    """Query one chat backend on every matching item. Resumable: skips done items."""
+              state_format: str = "text", complete=None, decide=None) -> pathlib.Path:
+    """Query one model on every matching item. Resumable: skips done items.
+
+    Chat models (backends/chat.py) get the full prompt and the images. Typed-decision
+    models (backends/decision.py: Jev, Laya) get instructions + criteria + a state,
+    text or JSON (`state_format`), and only exist for the `text` representation.
+    """
+    from motion_sport.backends import decision as dec
     from motion_sport.backends.chat import Request
     from motion_sport.backends.chat import complete as default_complete
 
     complete = complete or default_complete
+    decide = decide or dec.decide
+    is_decision = dec.is_decision_model(model_id)
+    if is_decision and rep != "text":
+        raise ValueError(f"{model_id} reads text only: use --repr text")
+    if state_format not in ("text", "json"):
+        raise ValueError(state_format)
     root = pathlib.Path(items_dir)
     cands = json.loads((root / "config.json").read_text())["candidates"]
     items = [i for i in load_items(root) if i["condition"] == condition and i["repr"] == rep]
     if rep == "gif":
         raise ValueError("gif items are for the human study / video models, not chat backends")
     items = items[:limit] if limit else items
-    path = _pred_path(root, model_id, condition, rep)
+    name = model_id + ("" if not is_decision or state_format == "text" else "+json")
+    path = _pred_path(root, name, condition, rep)
     path.parent.mkdir(parents=True, exist_ok=True)
     done = {}
     if path.exists():
@@ -218,15 +237,21 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
         for n, it in enumerate(items, 1):
             if it["item_id"] in done:
                 continue
-            images = [(root / f).read_bytes() for f in it["files"]]
             try:
-                raw = complete(model_id, Request(it["prompt"], images, max_tokens, temperature))
-                parsed = parse_answer(raw, cands)
+                if is_decision:
+                    state = it["state_text"] if state_format == "text" else it["state_json"]
+                    parsed = decide(model_id, dec.Decision(state, it["decision_instructions"],
+                                                           it["decision_criteria"]))
+                    raw = parsed.pop("raw", "")
+                else:
+                    images = [(root / f).read_bytes() for f in it["files"]]
+                    raw = complete(model_id, Request(it["prompt"], images, max_tokens, temperature))
+                    parsed = parse_answer(raw, cands)
             except Exception as e:  # noqa: BLE001 — record and move on; resumable
                 raw, parsed = "", {"label": None, "probs": {}, "rationale": "",
                                    "error": f"{type(e).__name__}: {e}"[:300]}
             rec = {"item_id": it["item_id"], "clip_id": it["clip_id"], "sport": it["sport"],
-                   "match_id": it["match_id"], "tags": it["tags"], "model": model_id,
+                   "match_id": it["match_id"], "tags": it["tags"], "model": name,
                    "condition": condition, "repr": rep, "raw": raw[:2000], **parsed}
             fh.write(json.dumps(rec) + "\n")
             fh.flush()

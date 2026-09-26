@@ -144,16 +144,39 @@ Todos sobre **exactamente los mismos ítems**.
      Qwen...) por la ruta de Model Inference, la misma que usó
      `wheres-the-ball/scripts/fase1_run_foundry.py`.
    - En imagen (`sheet`, `trails`) y en texto (`text`) para RQ4.
-2. **Encoder de vídeo congelado + probe lineal** (`backends/probe.py`). Por defecto
+2. **Modelos de decisión tipada: Jev (TypeSafe) y Laya (Convai)**
+   (`backends/decision.py`). No generan texto: reciben un *estado* y una pregunta de
+   opción cerrada y devuelven una probabilidad calibrada por opción en una sola
+   pasada. Es el "clasificador que no entrenamos nosotros". Consideraciones:
+   - **Solo leen texto**, así que van sobre la representación `text` (coordenadas
+     enteras ×100), en texto plano o como JSON (`--state-format json`). Son
+     directamente comparables con los VLM en modo texto, con los mismos ítems.
+   - **Fuera de su dominio**: están entrenados para tickets, emails y trazas, no para
+     series de coordenadas. Que acierten *zero-shot* sería sorprendente, y es
+     justamente lo que se mide. El nombre del deporte en `criteria` es neutro, sin
+     pistas de cómo se mueve cada uno. La variante "informada" (describir cada deporte
+     en `criteria`) es el equivalente al prompt informado de la Parte 1.
+   - **Contexto**: Jev lee 32k tokens. Laya lee 512 (inglés) o hasta 8.192
+     (`multilingual` con `max_len=8192`). Una vista de 8 × 12 jugadores ocupa unos
+     600-700 tokens, y el informe guarda `max_input_tokens` para detectar truncados.
+   - **Azure**: Jev no está en Foundry (API propia de TypeSafe). Laya tiene pesos
+     abiertos (Apache-2.0) y trae `laya-serve`, que expone el mismo protocolo
+     `/v1/systemone` que Jev, así que se puede desplegar como contenedor en Azure y
+     usarlo con `laya-http:`. Un solo cliente sirve para los dos.
+   - **Vía de especialista barato**: al tener pesos abiertos, Laya se puede afinar con
+     nuestros clips (el repo trae un notebook de fine-tuning). Sería el brazo
+     "entrenado" sin diseñar una red propia, con validación agrupada por partido como
+     todo lo demás.
+3. **Encoder de vídeo congelado + probe lineal** (`backends/probe.py`). Por defecto
    V-JEPA 2 (Meta, auto-supervisado prediciendo movimiento en espacio latente); como
    contraste, VideoMAE (reconstrucción de píxeles). Solo se ajusta una regresión
    logística sobre el embedding, con validación cruzada por partido. Si esto basta,
    **no hace falta diseñar ni entrenar un especialista propio**.
-3. **Baseline cinemático** (`baselines.py`): 14 estadísticas de movimiento hechas a
+4. **Baseline cinemático** (`baselines.py`): 14 estadísticas de movimiento hechas a
    mano más una regresión logística. Es el especialista barato y transparente: si
    acierta, la señal está en el movimiento, y la pregunta pasa a ser si los modelos
    la *ven*.
-4. **Humanos:** los GIF (`--reprs gif`) sirven para una prueba con personas (tú y
+5. **Humanos:** los GIF (`--reprs gif`) sirven para una prueba con personas (tú y
    algunas más). Es el origen de la pregunta y el contraste más interesante del
    artículo.
 
@@ -171,8 +194,8 @@ Todos sobre **exactamente los mismos ítems**.
 1. **Fase 0 (hecha):** harness, controles verificados con datos de juguete, tests.
 2. **Fase 1, piloto sin rugby:** Metrica + SkillCorner (fútbol), SportVU o TeamTrack
    (baloncesto), TeamTrack (balonmano), NFL 2025. Unos 200 clips por deporte,
-   `strict` + `raw`, las 5 condiciones, imagen y texto. Baselines, probe V-JEPA 2 y
-   dos o tres VLM de Azure. Coste orientativo por modelo: 4 deportes × 200 clips ×
+   `strict` + `raw`, las 5 condiciones, imagen y texto. Baselines, Jev y Laya (texto),
+   probe V-JEPA 2 y dos o tres VLM de Azure. Coste orientativo por modelo: 4 deportes × 200 clips ×
    ~8 ítems ≈ 6.400 llamadas; se puede empezar con `--limit`.
 3. **Fase 2, rugby:** pipeline de extracción simétrico (ver `datasets.md`), rugby frente
    a fútbol extraído, y validación del ruido contra SoccerNet-GSR.

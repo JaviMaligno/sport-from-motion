@@ -54,6 +54,9 @@ def summarize(rows: list[dict], classes: list[str], n_boot: int = 2000) -> dict:
         "accuracy": _acc(rows), "accuracy_ci": cluster_bootstrap(rows, _acc, n_boot),
         "balanced_accuracy": bal(rows), "balanced_accuracy_ci": cluster_bootstrap(rows, bal, n_boot),
         "log_loss": _log_loss(rows), "log_loss_uniform": float(np.log(len(classes))),
+        # decision models report their input size: flags truncation by small contexts
+        "max_input_tokens": max((r["input_tokens"] for r in rows if r.get("input_tokens")),
+                                default=None),
         "confusion": {t: {p: sum(r["sport"] == t and r["label"] == p for r in rows)
                           for p in classes + ["__none__"]} for t in classes},
     }

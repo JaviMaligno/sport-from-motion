@@ -69,10 +69,8 @@ def candidate_order(candidates: list[str], seed: int) -> list[str]:
     return [candidates[i] for i in rng.permutation(len(candidates))]
 
 
-def build_prompt(view: View, repr_kind: str, candidates: list[str], *, seed: int,
-                 text_payload: str | None = None) -> tuple[str, list[str]]:
-    """Return (prompt, shown_order). `repr_kind` in {"image", "trails", "text"}."""
-    order = candidate_order(candidates, seed)
+def describe_view(view: View, repr_kind: str, where: str = "given below") -> str:
+    """The shared description: what was removed, and what this view shows."""
     k = len(view.frames)
     span = max(view.frame_times) - min(view.frame_times) if k > 1 else 0.0
     dt = span / (k - 1) if k > 1 else 0.0
@@ -82,13 +80,32 @@ def build_prompt(view: View, repr_kind: str, candidates: list[str], *, seed: int
         raise ValueError(f"no prompt for condition={view.condition} repr={repr_kind}")
     what = what.format(k=k, dt=dt, span=span)
     if repr_kind == "text":
-        what = what.replace("snapshots", "snapshots (given below as coordinates)")
+        what = what.replace("snapshots", f"snapshots ({where} as coordinates)")
         what = what.replace("panel 1", "snapshot 1")
-    parts = [_PREAMBLE, what]
+        if view.condition == "formation":
+            what += f" Player positions are {where} as coordinates."
+    return f"{_PREAMBLE}\n\n{what}"
+
+
+def build_prompt(view: View, repr_kind: str, candidates: list[str], *, seed: int,
+                 text_payload: str | None = None) -> tuple[str, list[str]]:
+    """Chat prompt. Return (prompt, shown_order). `repr_kind` in {"image", "trails", "text"}."""
+    order = candidate_order(candidates, seed)
+    parts = [describe_view(view, repr_kind)]
     if text_payload:
         parts.append(text_payload)
     parts.append(_ASK.format(options=", ".join(f'"{SPORTS[c]}"' for c in order)))
     return "\n\n".join(parts), order
+
+
+def build_decision(view: View, candidates: list[str], *, seed: int) -> tuple[str, dict[str, str]]:
+    """Instructions + criteria for typed-decision models (Jev, Laya); the coordinates
+    go in the separate `state` field. Criteria descriptions are just the sport names
+    (neutral: no hints about how each sport moves)."""
+    order = candidate_order(candidates, seed)
+    instructions = describe_view(view, "text", where="given in the input") + \
+        "\n\nWhich team sport is this?"
+    return instructions, {c: SPORTS[c] for c in order}
 
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
