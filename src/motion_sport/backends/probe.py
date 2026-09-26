@@ -54,37 +54,7 @@ class HFVideoEncoder:
 
 def fit_probe_oof(X: np.ndarray, y: list[str], groups: list[str], n_splits: int = 5,
                   seed: int = 0) -> tuple[list[str], list[dict[str, float]]]:
-    """Out-of-fold predictions of a standardised logistic regression, grouped by match.
+    """Out-of-fold predictions of a standardised logistic regression, grouped by match."""
+    from motion_sport.learners import grouped_oof, logistic_fit_predict
 
-    Grouping by match is not optional: clips from the same match share players,
-    camera and conditions, and a random split would let the probe recognise the
-    match instead of the sport.
-    """
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import GroupKFold
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-
-    y_arr = np.asarray(y)
-    classes = sorted(set(y))
-    if len(classes) < 2:
-        raise ValueError(f"need at least 2 sports to classify, got {classes}")
-    n_groups = len(set(groups))
-    splits = min(n_splits, n_groups)
-    if splits < 2:
-        raise ValueError("need at least 2 matches for grouped cross-validation")
-    pred = [""] * len(y)
-    probs: list[dict[str, float]] = [{} for _ in y]
-    for train, test in GroupKFold(n_splits=splits).split(X, y_arr, groups):
-        if len(set(y_arr[train])) < 2:
-            continue
-        clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, C=1.0,
-                                                                 random_state=seed))
-        clf.fit(X[train], y_arr[train])
-        p = clf.predict_proba(X[test])
-        for i, row in zip(test, p):
-            d = {c: 0.0 for c in classes}
-            d.update({c: float(v) for c, v in zip(clf.classes_, row)})
-            probs[i] = d
-            pred[i] = max(d, key=d.get)
-    return pred, probs
+    return grouped_oof(y, groups, logistic_fit_predict(X, y, seed), n_splits)

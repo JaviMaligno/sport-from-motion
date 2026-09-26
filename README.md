@@ -33,7 +33,8 @@ resultado.
 ```bash
 cd experiments/sport-from-motion
 uv venv && uv pip install -e ".[dev]"      # núcleo: numpy, pillow, scikit-learn
-uv pip install -e ".[probe]"               # opcional: torch + transformers (V-JEPA 2)
+uv pip install -e ".[series]"              # opcional: aeon (MiniRocket)
+uv pip install -e ".[probe]"               # opcional: torch + transformers (V-JEPA 2, DeepSets)
 uv run pytest
 ```
 
@@ -57,13 +58,20 @@ motion-sport prepare --clips data/clips --out runs/pilot-raw --preset raw --cond
 motion-sport baseline --items runs/pilot-strict --features nuisance
 motion-sport baseline --items runs/pilot-strict --features kinematic
 
-# 4. Modelos (reanudable: se puede cortar y relanzar)
+# 4. Clasificadores ajustados sobre nuestros clips (CV agrupada por partido),
+#    en las mismas condiciones que los VLM para poder contrastarlas
+for c in motion motion_shuffled kinematics kinematics_solo; do
+  motion-sport fit --items runs/pilot-strict --learner minirocket --condition $c
+done
+motion-sport fit --items runs/pilot-strict --learner deepsets --condition formation
+
+# 5. Modelos sin entrenar (reanudable: se puede cortar y relanzar)
 motion-sport run --items runs/pilot-strict --model azure-anthropic:claude-opus-5-5 \
     --condition motion --repr sheet --limit 50
 motion-sport run --items runs/pilot-strict --model azure-openai:gpt-5.4 --condition motion_shuffled --repr sheet
 motion-sport probe --items runs/pilot-strict --encoder facebook/vjepa2-vitl-fpc64-256
 
-# 5. Informe con IC agrupados por partido y contrastes emparejados
+# 6. Informe con IC agrupados por partido y contrastes emparejados
 motion-sport report --items runs/pilot-strict
 motion-sport report --items runs/pilot-strict --tag pre_snap     # subcaso formación
 ```
@@ -118,6 +126,7 @@ src/motion_sport/
   backends/decision.py  Jev / Laya (protocolo /v1/systemone o Laya en proceso)
   backends/probe.py  encoder de vídeo congelado (V-JEPA 2 / VideoMAE) + probe logístico
   baselines.py     clasificadores de atajos (nuisance, tempo) y cinemático
+  learners.py      CV agrupada por partido; MiniRocket (series invariantes) y DeepSets
   evaluate.py      métricas, bootstrap agrupado por partido, contrastes emparejados
   pipeline.py      prepare / run_model / run_baseline / run_probe / report
   cli.py           `motion-sport ...`

@@ -271,6 +271,35 @@ def run_baseline(items_dir: str, features: str, seed: int = 0) -> pathlib.Path:
     return _write_clip_preds(root, f"baseline:{features}", clips, pred, probs)
 
 
+def run_learner(items_dir: str, learner: str, condition: str = "motion", seed: int = 0,
+                epochs: int = 150) -> pathlib.Path:
+    """MiniRocket or DeepSets on the controlled clips, grouped-CV by match.
+
+    Both see the same condition a VLM sees (built with the same seeded view), so
+    `report` can compute the same paired contrasts (motion vs shuffled, etc.).
+    """
+    from motion_sport import learners
+
+    root = pathlib.Path(items_dir)
+    clips = load_clips(root / "clips")
+    y, groups = [c.sport for c in clips], [c.match_id for c in clips]
+    seeds = [stable_seed(c.clip_id, str(seed)) for c in clips]
+    if learner == "minirocket":
+        X = np.stack([learners.clip_series(c, condition, s) for c, s in zip(clips, seeds)])
+        fp = learners.minirocket_fit_predict(X, y, seed=seed)
+        rep = "series"
+    elif learner == "deepsets":
+        cfg = json.loads((root / "config.json").read_text())
+        tok = [learners.player_tokens(c, condition, s, k=cfg["frames_per_view"])
+               for c, s in zip(clips, seeds)]
+        fp = learners.deepsets_fit_predict(tok, y, seed=seed, epochs=epochs)
+        rep = "tracks"
+    else:
+        raise ValueError(f"unknown learner {learner!r}")
+    pred, probs = learners.grouped_oof(y, groups, fp)
+    return _write_clip_preds(root, learner, clips, pred, probs, condition=condition, rep=rep)
+
+
 def run_probe(items_dir: str, encoder: str, condition: str = "motion", num_frames: int = 16,
               image_size: int = 256, seed: int = 0) -> pathlib.Path:
     """Frozen video encoder on re-rendered clips + grouped-CV logistic probe."""

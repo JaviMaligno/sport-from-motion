@@ -11,8 +11,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# frozen video encoders (V-JEPA 2, VideoMAE) for the probe baseline
+# frozen video encoders (V-JEPA 2, VideoMAE) for the probe baseline; also DeepSets
 probe = ["torch>=2.3", "transformers>=4.53"]
+# MiniRocket time-series classifier (random convolution kernels + linear fit)
+series = ["aeon>=1.0"]
 # Laya typed-decision model in-process (Apache-2.0); not needed for laya-http:
 laya = ["laya>=0.3.20"]
 dev = ["pytest>=8"]

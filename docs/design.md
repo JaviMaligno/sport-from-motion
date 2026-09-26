@@ -167,16 +167,31 @@ Todos sobre **exactamente los mismos ítems**.
      nuestros clips (el repo trae un notebook de fine-tuning). Sería el brazo
      "entrenado" sin diseñar una red propia, con validación agrupada por partido como
      todo lo demás.
-3. **Encoder de vídeo congelado + probe lineal** (`backends/probe.py`). Por defecto
+3. **MiniRocket** (`learners.py`, `motion-sport fit --learner minirocket`). Miles de
+   filtros convolucionales *aleatorios, sin entrenar*, más una regresión logística. Es
+   el escalón "representación fija + ajuste lineal" nativo de series temporales, y
+   el equivalente para trayectorias de lo que se buscaba con Jev/Laya: no entrenar
+   un modelo propio. Como no puede recibir jugadores sin orden, lee 9 series
+   invariantes a permutación y rotación por clip (cuantiles de velocidad,
+   aceleración, giro, alineación colectiva, alineación con el vecino, dispersión,
+   distancia al vecino). Los sesgos de los filtros dependen de los datos y se
+   ajustan dentro de cada fold.
+4. **Encoder de vídeo congelado + probe lineal** (`backends/probe.py`). Por defecto
    V-JEPA 2 (Meta, auto-supervisado prediciendo movimiento en espacio latente); como
    contraste, VideoMAE (reconstrucción de píxeles). Solo se ajusta una regresión
    logística sobre el embedding, con validación cruzada por partido. Si esto basta,
    **no hace falta diseñar ni entrenar un especialista propio**.
-4. **Baseline cinemático** (`baselines.py`): 14 estadísticas de movimiento hechas a
+5. **DeepSets** (`motion-sport fit --learner deepsets`). La arquitectura del
+   especialista de la Parte 2 (MLP por jugador → media + máximo → cabeza), ahora con
+   salida de clasificación. Lee la trayectoria de cada jugador en la misma vista que
+   ve un VLM, con rotaciones aleatorias como aumento de datos y un calendario fijo de
+   épocas (sin early stopping, porque no hay validación a la que mirar). Es el
+   "David" de esta pregunta: minutos de CPU.
+6. **Baseline cinemático** (`baselines.py`): 14 estadísticas de movimiento hechas a
    mano más una regresión logística. Es el especialista barato y transparente: si
    acierta, la señal está en el movimiento, y la pregunta pasa a ser si los modelos
    la *ven*.
-5. **Humanos:** los GIF (`--reprs gif`) sirven para una prueba con personas (tú y
+7. **Humanos:** los GIF (`--reprs gif`) sirven para una prueba con personas (tú y
    algunas más). Es el origen de la pregunta y el contraste más interesante del
    artículo.
 
@@ -194,8 +209,8 @@ Todos sobre **exactamente los mismos ítems**.
 1. **Fase 0 (hecha):** harness, controles verificados con datos de juguete, tests.
 2. **Fase 1, piloto sin rugby:** Metrica + SkillCorner (fútbol), SportVU o TeamTrack
    (baloncesto), TeamTrack (balonmano), NFL 2025. Unos 200 clips por deporte,
-   `strict` + `raw`, las 5 condiciones, imagen y texto. Baselines, Jev y Laya (texto),
-   probe V-JEPA 2 y dos o tres VLM de Azure. Coste orientativo por modelo: 4 deportes × 200 clips ×
+   `strict` + `raw`, las 5 condiciones, imagen y texto. Baselines, MiniRocket,
+   DeepSets, probe V-JEPA 2, dos o tres VLM de Azure y Jev/Laya (texto). Coste orientativo por modelo: 4 deportes × 200 clips ×
    ~8 ítems ≈ 6.400 llamadas; se puede empezar con `--limit`.
 3. **Fase 2, rugby:** pipeline de extracción simétrico (ver `datasets.md`), rugby frente
    a fútbol extraído, y validación del ruido contra SoccerNet-GSR.
@@ -211,3 +226,8 @@ Todos sobre **exactamente los mismos ítems**.
 - **Duración del clip.** 4 s puede ser poco para algunos patrones (una fase de
   rucks). Conviene hacer un barrido de duración en el piloto.
 - **Solo 3 partidos en Metrica.** Con TeamTrack/PFF se amplía.
+- **Validación agrupada con pocos partidos.** Si un fold de test tiene la proporción
+  de clases invertida respecto a su fold de entrenamiento, un clasificador sin señal
+  puede quedar *por debajo* del azar (en el smoke test, un DeepSets infraentrenado
+  sacó 0.20 con 2 clases). Un valor bajo el azar es un aviso de pocos grupos, no un
+  hallazgo. Se mitiga con más partidos por deporte y con la exactitud balanceada.

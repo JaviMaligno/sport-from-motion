@@ -98,6 +98,16 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--features", required=True, choices=["nuisance", "tempo", "kinematic"])
     b.set_defaults(func=lambda a: print(pipeline.run_baseline(a.items, a.features)))
 
+    fl = sub.add_parser("fit", help="MiniRocket (needs .[series]) or DeepSets (needs .[probe]), "
+                                    "grouped CV by match")
+    fl.add_argument("--items", required=True)
+    fl.add_argument("--learner", required=True, choices=["minirocket", "deepsets"])
+    fl.add_argument("--condition", default="motion")
+    fl.add_argument("--seed", type=int, default=0)
+    fl.add_argument("--epochs", type=int, default=150, help="deepsets only")
+    fl.set_defaults(func=lambda a: print(pipeline.run_learner(
+        a.items, a.learner, a.condition, a.seed, a.epochs)))
+
     pr = sub.add_parser("probe", help="frozen video encoder + linear probe (needs .[probe])")
     pr.add_argument("--items", required=True)
     pr.add_argument("--encoder", default="facebook/vjepa2-vitl-fpc64-256")
