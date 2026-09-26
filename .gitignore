@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+# downloaded sources, generated clips/items/predictions: never committed
+data/
+runs/
+# the root .gitignore ignores .env*; the template carries no secrets
+!.env.example
