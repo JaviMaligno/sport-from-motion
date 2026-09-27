@@ -111,7 +111,11 @@ _YD = 0.9144
 
 def load_nfl_tracking(csv_path: str | pathlib.Path, *, clip_seconds: float = 4.0,
                       stride_seconds: float = 4.0, target_fps: float | None = 5.0,
-                      max_plays: int | None = None) -> Iterator[Clip]:
+                      max_plays: int | None = None,
+                      trim_start_s: float = 0.0) -> Iterator[Clip]:
+    """`trim_start_s` drops the start of every play stream. BDB 2023 plays start 0.5 s
+    before the snap, so untrimmed clips are all "still, then everyone moves at once" —
+    an alignment no other sport's random windows have. Trimming 1.5 s gives mid-play clips."""
     plays: dict[tuple[str, str], dict[int, dict]] = defaultdict(dict)
     with open(csv_path, newline="") as fh:
         reader = csv.DictReader(fh)
@@ -146,8 +150,13 @@ def load_nfl_tracking(csv_path: str | pathlib.Path, *, clip_seconds: float = 4.0
             for fi, k in enumerate(sel):
                 for p, pos in frames[k]["p"].items():
                     xy[fi, idx[p]] = pos
+            if trim_start_s:
+                xy = xy[int(round(trim_start_s * 10.0)):]
+                if not len(xy):
+                    continue
             yield from window_stream(
                 xy, sport="american_football", source="nfl_bdb", match_id=game, fps=10.0,
                 clip_seconds=clip_seconds, stride_seconds=stride_seconds, target_fps=target_fps,
-                id_prefix=f"nfl-{game}-{play}-{phase}", tags=[phase],
+                id_prefix=f"nfl-{game}-{play}-{phase}" + (f"-t{trim_start_s:g}" if trim_start_s else ""),
+                tags=[phase] + (["mid_play"] if trim_start_s else []),
             )

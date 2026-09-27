@@ -21,7 +21,8 @@ def _ingest(a) -> None:
         clips = loaders.load_sportvu_game(a.input, target_fps=a.target_fps, **kw)
     elif a.source == "nfl":
         clips = loaders.load_nfl_tracking(a.input, target_fps=a.target_fps,
-                                          max_plays=a.max_plays, **kw)
+                                          max_plays=a.max_plays,
+                                          trim_start_s=a.trim_start_seconds, **kw)
     elif a.source == "long-csv":
         if not (a.sport and a.fps):
             sys.exit("long-csv needs --sport and --fps")
@@ -59,6 +60,8 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--tags", help="long-csv: comma-separated tags for every clip")
     g.add_argument("--group-extra", help="long-csv: extra columns that split a match into "
                    "continuous streams (e.g. segment, playId)")
+    g.add_argument("--trim-start-seconds", type=float, default=0.0,
+                   help="nfl: drop the first seconds of every play (mid-play clips)")
     g.add_argument("--max-plays", type=int)
     g.add_argument("--n-toy", type=int, default=20)
     g.add_argument("--seed", type=int, default=0)
