@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import pathlib
+import threading
 import zlib
 from collections import Counter, defaultdict
 from dataclasses import replace as dc_replace
@@ -77,8 +78,12 @@ def _png(img) -> bytes:
 def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
             conditions: list[str], reprs: list[str], per_sport: int | None = None,
             candidates: list[str] | None = None, frames_per_view: int = 8,
-            image_size: int = 320, seed: int = 0) -> pathlib.Path:
+            image_size: int = 320, seed: int = 0,
+            n_players: int | None = None) -> pathlib.Path:
     cfg = PRESETS[preset]
+    if n_players and cfg.n_players:
+        # N must not exceed the smallest roster in the comparison (10 in basketball)
+        cfg = dc_replace(cfg, n_players=n_players)
     out = pathlib.Path(out_dir)
     (out / "clips").mkdir(parents=True, exist_ok=True)
     raw = balanced_sample(load_clips(clips_dir), per_sport, seed)
@@ -196,9 +201,35 @@ def _pred_path(items_dir, name: str, condition: str, rep: str) -> pathlib.Path:
     return pathlib.Path(items_dir) / "predictions" / f"{safe}__{condition}__{rep}.jsonl"
 
 
+def interleave(items: list[dict]) -> list[dict]:
+    """Round-robin over sports, and over matches within a sport, in a fixed order.
+
+    The key depends on the clip only, never on the condition, so `--limit N` picks
+    the *same* clips in every condition (paired contrasts need that) and any prefix
+    of the run is balanced by sport instead of being all one sport.
+    """
+    by_sport: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    for it in sorted(items, key=lambda i: stable_seed(i["clip_id"], "order")):
+        by_sport[it["sport"]][it["match_id"]].append(it)
+
+    def per_sport(matches: dict[str, list[dict]]) -> list[dict]:
+        queues = [matches[m] for m in sorted(matches, key=lambda m: stable_seed(m, "order"))]
+        out = []
+        while any(queues):
+            out += [q.pop(0) for q in queues if q]
+        return out
+
+    streams = [per_sport(by_sport[s]) for s in sorted(by_sport)]
+    out = []
+    while any(streams):
+        out += [q.pop(0) for q in streams if q]
+    return out
+
+
 def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
               limit: int | None = None, max_tokens: int = 1024, temperature: float = 0.0,
-              state_format: str = "text", complete=None, decide=None) -> pathlib.Path:
+              state_format: str = "text", complete=None, decide=None,
+              workers: int = 1) -> pathlib.Path:
     """Query one model on every matching item. Resumable: skips done items.
 
     Chat models (backends/chat.py) get the full prompt and the images. Typed-decision
@@ -221,6 +252,7 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
     items = [i for i in load_items(root) if i["condition"] == condition and i["repr"] == rep]
     if rep == "gif":
         raise ValueError("gif items are for the human study / video models, not chat backends")
+    items = interleave(items)
     items = items[:limit] if limit else items
     name = model_id + ("" if not is_decision or state_format == "text" else "+json")
     path = _pred_path(root, name, condition, rep)
@@ -231,32 +263,44 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
             r = json.loads(line)
             if not r.get("error") or r.get("label"):
                 done[r["item_id"]] = r
-    with path.open("w") as fh:
-        for r in done.values():
-            fh.write(json.dumps(r) + "\n")
-        for n, it in enumerate(items, 1):
-            if it["item_id"] in done:
-                continue
-            try:
-                if is_decision:
-                    state = it["state_text"] if state_format == "text" else it["state_json"]
-                    parsed = decide(model_id, dec.Decision(state, it["decision_instructions"],
-                                                           it["decision_criteria"]))
-                    raw = parsed.pop("raw", "")
-                else:
-                    images = [(root / f).read_bytes() for f in it["files"]]
-                    raw = complete(model_id, Request(it["prompt"], images, max_tokens, temperature))
-                    parsed = parse_answer(raw, cands)
-            except Exception as e:  # noqa: BLE001 — record and move on; resumable
-                raw, parsed = "", {"label": None, "probs": {}, "rationale": "",
-                                   "error": f"{type(e).__name__}: {e}"[:300]}
-            rec = {"item_id": it["item_id"], "clip_id": it["clip_id"], "sport": it["sport"],
-                   "match_id": it["match_id"], "tags": it["tags"], "model": name,
-                   "condition": condition, "repr": rep, "raw": raw[:2000], **parsed}
+    lock = threading.Lock()
+
+    def one(n: int, it: dict, fh) -> None:
+        try:
+            if is_decision:
+                state = it["state_text"] if state_format == "text" else it["state_json"]
+                parsed = decide(model_id, dec.Decision(state, it["decision_instructions"],
+                                                       it["decision_criteria"]))
+                raw = parsed.pop("raw", "")
+            else:
+                images = [(root / f).read_bytes() for f in it["files"]]
+                from motion_sport.backends.chat import last_usage
+                raw = complete(model_id, Request(it["prompt"], images, max_tokens, temperature))
+                parsed = parse_answer(raw, cands)
+                parsed["usage"] = last_usage()
+        except Exception as e:  # noqa: BLE001 — record and move on; resumable
+            raw, parsed = "", {"label": None, "probs": {}, "rationale": "",
+                               "error": f"{type(e).__name__}: {e}"[:300]}
+        rec = {"item_id": it["item_id"], "clip_id": it["clip_id"], "sport": it["sport"],
+               "match_id": it["match_id"], "tags": it["tags"], "model": name,
+               "condition": condition, "repr": rep, "raw": raw[:2000], **parsed}
+        with lock:
             fh.write(json.dumps(rec) + "\n")
             fh.flush()
             print(f"[{n}/{len(items)}] {it['clip_id']} true={it['sport']} "
                   f"pred={parsed['label'] or parsed['error']}", flush=True)
+
+    todo = [(n, it) for n, it in enumerate(items, 1) if it["item_id"] not in done]
+    with path.open("w") as fh:
+        for r in done.values():
+            fh.write(json.dumps(r) + "\n")
+        if workers <= 1:
+            for n, it in todo:
+                one(n, it, fh)
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(workers) as pool:
+                list(pool.map(lambda t: one(t[0], t[1], fh), todo))
     return path
 
 
@@ -354,12 +398,17 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
     for (model, cond, rep), rows in by_key.items():
         if cond != "motion":
             continue
+        # condition contrasts only within one representation: text vs another condition's
+        # image would mix RQ1/RQ2 with RQ4
         for other in ("motion_shuffled", "formation", "kinematics", "kinematics_solo"):
-            for orep in (rep, "sheet"):
-                if (model, other, orep) in by_key:
-                    contrasts.append({"model": model, "a": f"motion/{rep}", "b": f"{other}/{orep}",
-                                      **paired_difference(rows, by_key[(model, other, orep)], n_boot)})
-                    break
+            if (model, other, rep) in by_key:
+                contrasts.append({"model": model, "a": f"motion/{rep}", "b": f"{other}/{rep}",
+                                  **paired_difference(rows, by_key[(model, other, rep)], n_boot)})
+    # RQ4: same condition, text vs image
+    for (model, cond, rep), rows in by_key.items():
+        if rep == "text" and (model, cond, "sheet") in by_key:
+            contrasts.append({"model": model, "a": f"{cond}/text", "b": f"{cond}/sheet",
+                              **paired_difference(rows, by_key[(model, cond, "sheet")], n_boot)})
     return {"candidates": cands, "tag": tag,
             "runs": {k: {**v["meta"], **v["summary"]} for k, v in runs.items()},
             "contrasts": contrasts}

@@ -215,6 +215,10 @@ Todos sobre **exactamente los mismos ítems**.
 3. **Fase 2, rugby:** pipeline de extracción simétrico (ver `datasets.md`), rugby frente
    a fútbol extraído, y validación del ruido contra SoccerNet-GSR.
 4. **Fase 3 (opcional):** esqueletos (Nivel B) y subcaso de balón parado con eventos.
+5. **Laya afinada (fase posterior):** en el piloto solo entra Jev (zero-shot, por
+   OpenRouter). Laya se deja para después y no se evalúa zero-shot: al tener pesos
+   abiertos, su sitio es el brazo "entrenado" (fine-tuning con nuestros clips y
+   validación agrupada por partido), comparado con MiniRocket y DeepSets.
 
 ## 9. Riesgos y preguntas abiertas
 

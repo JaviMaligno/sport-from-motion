@@ -14,6 +14,10 @@ Both speak the same wire protocol, TypeSafe's `POST /v1/systemone`:
 Routes:
   jev:<model>          TypeSafe API. env TYPESAFE_API_KEY (+ TYPESAFE_BASE_URL,
                        default https://api.typesafe.ai/v1). Model e.g. "jev-latest".
+  jev-openrouter:<model>  Jev served by OpenRouter (alpha decisions API, same body).
+                       env OPENROUTER_API_KEY (+ JEV_BASE_URL, default
+                       https://openrouter.ai/api/alpha/decisions). Model e.g.
+                       "~typesafe/jev-latest". $0.042/M input tokens, output free.
   laya-http:<model>    a `laya-serve` server (same protocol): local, or deployed as a
                        container on Azure. env LAYA_BASE_URL (e.g. http://localhost:8000/v1),
                        optional LAYA_API_KEY. Model: english | multilingual | typed-decisions.
@@ -57,6 +61,12 @@ def _jev(model: str, d: Decision) -> dict:
     return _systemone(base, _env("TYPESAFE_API_KEY"), model, d)
 
 
+def _jev_openrouter(model: str, d: Decision) -> dict:
+    url = os.environ.get("JEV_BASE_URL", "https://openrouter.ai/api/alpha/decisions")
+    return _post(url, {"Authorization": f"Bearer {_env('OPENROUTER_API_KEY')}"},
+                 {"model": model, "state": d.state, "questions": _questions(d)})
+
+
 def _laya_http(model: str, d: Decision) -> dict:
     return _systemone(_env("LAYA_BASE_URL"), os.environ.get("LAYA_API_KEY"), model, d)
 
@@ -76,7 +86,7 @@ def _laya_local(model: str, d: Decision) -> dict:
     return _ROUTER.predict(d.state, _questions(d), model=model, max_len=max_len)
 
 
-ROUTES = {"jev": _jev, "laya-http": _laya_http, "laya": _laya_local}
+ROUTES = {"jev": _jev, "jev-openrouter": _jev_openrouter, "laya-http": _laya_http, "laya": _laya_local}
 
 
 def is_decision_model(model_id: str) -> bool:

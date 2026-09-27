@@ -71,12 +71,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--candidates", help="extra distractor sports offered to the model")
     p.add_argument("--frames-per-view", type=int, default=8)
     p.add_argument("--image-size", type=int, default=320)
+    p.add_argument("--n-players", type=int,
+                   help="override the preset's fixed player count (<= smallest roster compared)")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=lambda a: print(pipeline.prepare(
         a.clips, a.out, preset=a.preset, conditions=a.conditions.split(","),
         reprs=a.reprs.split(","), per_sport=a.per_sport,
         candidates=a.candidates.split(",") if a.candidates else None,
-        frames_per_view=a.frames_per_view, image_size=a.image_size, seed=a.seed)))
+        frames_per_view=a.frames_per_view, image_size=a.image_size, seed=a.seed,
+        n_players=a.n_players)))
 
     r = sub.add_parser("run", help="query a model: chat (backends/chat.py) or typed-decision "
                                    "(backends/decision.py: jev:, laya:, laya-http:)")
@@ -89,9 +92,11 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--temperature", type=float, default=0.0)
     r.add_argument("--state-format", default="text", choices=["text", "json"],
                    help="typed-decision models only: send the coordinates as text or JSON")
+    r.add_argument("--workers", type=int, default=1, help="concurrent requests")
     r.set_defaults(func=lambda a: print(pipeline.run_model(
         a.items, a.model, condition=a.condition, rep=a.repr, limit=a.limit,
-        max_tokens=a.max_tokens, temperature=a.temperature, state_format=a.state_format)))
+        max_tokens=a.max_tokens, temperature=a.temperature, state_format=a.state_format,
+        workers=a.workers)))
 
     b = sub.add_parser("baseline", help="nuisance / tempo / kinematic feature classifiers")
     b.add_argument("--items", required=True)

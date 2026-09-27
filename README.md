@@ -24,9 +24,9 @@ hermano de [*Where's the ball?*](https://github.com/JaviMaligno/wheres-the-ball)
 
 ## Estado
 
-Harness completo y probado; **no hay resultados**. `loaders/synthetic.py` genera
-datos de juguete solo para probar el pipeline, y nada de lo que sale de ahí es un
-resultado.
+Harness probado con datos reales. **Piloto 1 (fútbol vs baloncesto) hecho**: ver
+[`docs/pilot-2026-09-27.md`](docs/pilot-2026-09-27.md). `loaders/synthetic.py` sigue
+siendo solo para pruebas.
 
 ## Instalación
 
@@ -37,6 +37,10 @@ uv pip install -e ".[series]"              # opcional: aeon (MiniRocket)
 uv pip install -e ".[probe]"               # opcional: torch + transformers (V-JEPA 2, DeepSets)
 uv run pytest
 ```
+
+En Mac Intel (x86_64) numba ya no publica wheels: `uv venv -p 3.12`, luego
+`uv pip install "numba<0.62" "llvmlite<0.45" "numpy==2.2.6"`, y usar `.venv/bin/...`
+en vez de `uv run` (que re-sincroniza y vuelve a subir numpy, rompiendo MiniRocket).
 
 ## Flujo
 
@@ -68,7 +72,7 @@ motion-sport fit --items runs/pilot-strict --learner deepsets --condition format
 # 5. Modelos sin entrenar (reanudable: se puede cortar y relanzar)
 motion-sport run --items runs/pilot-strict --model azure-anthropic:claude-opus-5-5 \
     --condition motion --repr sheet --limit 50
-motion-sport run --items runs/pilot-strict --model azure-openai:gpt-5.4 --condition motion_shuffled --repr sheet
+motion-sport run --items runs/pilot-strict --model azure-openai:gpt-5.6-sol --condition motion_shuffled --repr sheet
 motion-sport probe --items runs/pilot-strict --encoder facebook/vjepa2-vitl-fpc64-256
 
 # 6. Informe con IC agrupados por partido y contrastes emparejados
@@ -95,6 +99,9 @@ Mismas variables que `experiments/judge-bias`; ver [`.env.example`](.env.example
 | `azure-openai:<deployment>` | GPT/Grok, `/openai/v1/chat/completions` | `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_KEY` |
 | `azure-foundry:<deployment>` | Llama, Mistral, Qwen..., `/models/chat/completions` | `AZURE_FOUNDRY_ENDPOINT` + `AZURE_FOUNDRY_KEY` |
 | `openai:` / `anthropic:` | APIs directas | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` |
+| `vertex:<model>` | Gemini en Vertex AI (`generateContent`), token de `gcloud` | `VERTEX_PROJECT` (+ `VERTEX_LOCATION`, por defecto `global`; `GCLOUD_BIN`) |
+| `vertex-anthropic:<model>` | Claude en Vertex AI (`rawPredict`) | las mismas |
+| `jev-openrouter:~typesafe/jev-latest` | Jev servido por OpenRouter (`/api/alpha/decisions`). Solo `--repr text` | `OPENROUTER_API_KEY` |
 | `jev:<model>` | Jev (TypeSafe), `POST /v1/systemone`. Solo `--repr text` | `TYPESAFE_API_KEY` (+ `TYPESAFE_BASE_URL`) |
 | `laya-http:<checkpoint>` | Laya tras `laya-serve` (mismo protocolo; local o contenedor en Azure) | `LAYA_BASE_URL` (+ `LAYA_API_KEY`) |
 | `laya:<checkpoint>` | Laya en proceso (`pip install -e ".[laya]"`) | `LAYA_MAX_LEN` (8192 por defecto) |

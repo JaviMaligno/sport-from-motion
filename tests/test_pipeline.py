@@ -61,3 +61,17 @@ def test_nuisance_baseline_is_at_chance_after_strict(prepared):
     rows = [json.loads(line) for line in p.read_text().splitlines()]
     acc = sum(r["label"] == r["sport"] for r in rows) / len(rows)
     assert acc < 0.8  # toy data: player count and field size would give 1.0 without controls
+
+
+def test_interleave_balances_any_prefix_and_is_condition_independent():
+    from motion_sport.pipeline import interleave
+
+    def items(cond):
+        return [{"clip_id": f"{s}-{m}-{k}", "sport": s, "match_id": f"{s}{m}", "condition": cond}
+                for s in ("a", "b") for m in range(3) for k in range(4)]
+
+    out = interleave(items("motion"))
+    assert {i["sport"] for i in out[:2]} == {"a", "b"}
+    assert sum(i["sport"] == "a" for i in out[:10]) == 5
+    assert len({i["match_id"] for i in out[:6]}) == 6  # spreads across matches too
+    assert [i["clip_id"] for i in out] == [i["clip_id"] for i in interleave(items("shuffled")[::-1])]

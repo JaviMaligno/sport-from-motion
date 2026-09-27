@@ -17,18 +17,25 @@ Model ids are "<route>:<deployment>", mirroring experiments/judge-bias/providers
                                 wheres-the-ball/scripts/fase1_run_foundry.py.
                                 env AZURE_FOUNDRY_ENDPOINT, AZURE_FOUNDRY_KEY
                                 -> {endpoint}/models/chat/completions
+                                Without a key, an Entra ID token from `az login` is used.
+  vertex:<model>                Gemini on Vertex AI (generateContent), token from `gcloud`.
+                                env VERTEX_PROJECT (+ VERTEX_LOCATION, default "global")
+  vertex-anthropic:<model>      Claude on Vertex AI (rawPredict, Messages body), same env.
   openai:<model>, anthropic:<model>   direct vendor APIs (OPENAI_API_KEY, ANTHROPIC_API_KEY)
   dummy:<uniform|first|echo>    offline; for smoke tests only
 
 The deployment name is whatever you called it in Foundry (by default the model id,
-e.g. "claude-opus-5-5" or "gpt-5.4").
+e.g. "claude-opus-5-5" or "gpt-5.6-sol").
 """
 from __future__ import annotations
 
 import base64
 import json
 import os
+import shutil
+import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -36,10 +43,21 @@ from dataclasses import dataclass, field
 
 TIMEOUT = 180
 RETRIES = 5
+# Reasoning models (gpt-5.x, Gemini 2.5+/3.x) count hidden thinking against the output
+# limit; without headroom the visible JSON is cut off mid-answer.
+REASONING_HEADROOM = int(os.environ.get("MOTION_SPORT_REASONING_HEADROOM", "16384"))
 
 
 class BackendError(RuntimeError):
     pass
+
+
+_LOCAL = threading.local()
+
+
+def last_usage() -> dict:
+    """Token usage of this thread's last successful call (provider's own field names)."""
+    return getattr(_LOCAL, "usage", {}) or {}
 
 
 @dataclass
@@ -58,7 +76,9 @@ def _post(url: str, headers: dict, payload: dict) -> dict:
                                      headers={"Content-Type": "application/json", **headers})
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                return json.loads(resp.read())
+                data = json.loads(resp.read())
+                _LOCAL.usage = data.get("usage") or data.get("usageMetadata") or {}
+                return data
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:500]
             last = BackendError(f"HTTP {e.code} from {url}: {detail}")
@@ -80,6 +100,41 @@ def _env(*names: str) -> str:
     raise BackendError(f"none of {names} is set")
 
 
+_TOKENS: dict[str, tuple[str, float]] = {}
+
+
+def _cli_token(name: str, cmd: list[str]) -> str:
+    """Bearer token from a logged-in CLI (az / gcloud), cached for 30 min."""
+    tok, at = _TOKENS.get(name, ("", 0.0))
+    if tok and time.time() - at < 1800:
+        return tok
+    exe = shutil.which(cmd[0]) or os.environ.get(f"{cmd[0].upper()}_BIN")
+    if not exe:
+        raise BackendError(f"{cmd[0]} not found (set {cmd[0].upper()}_BIN) and no API key set")
+    try:
+        tok = subprocess.run([exe, *cmd[1:]], check=True, capture_output=True,
+                             text=True, timeout=60).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise BackendError(f"{cmd[0]} token failed (log in again?): {e.stderr[:300]}") from None
+    _TOKENS[name] = (tok, time.time())
+    return tok
+
+
+_GCLOUD = ["gcloud", "auth", "print-access-token"]
+
+
+def _post_gcloud(url: str, payload: dict, post=None) -> dict:
+    """POST with a gcloud bearer token; on 401 (token expired mid-run) refresh once."""
+    post = post or (lambda u, h, p: _post(u, h, p))
+    try:
+        return post(url, {"Authorization": f"Bearer {_cli_token('gcloud', _GCLOUD)}"}, payload)
+    except BackendError as e:
+        if "HTTP 401" not in str(e):
+            raise
+        _TOKENS.pop("gcloud", None)
+        return post(url, {"Authorization": f"Bearer {_cli_token('gcloud', _GCLOUD)}"}, payload)
+
+
 def _b64(png: bytes) -> str:
     return base64.b64encode(png).decode()
 
@@ -95,8 +150,9 @@ def _chat_completions(url: str, headers: dict, model: str, req: Request,
     for png in req.images:
         content.append({"type": "image_url",
                         "image_url": {"url": f"data:image/png;base64,{_b64(png)}"}})
+    limit = req.max_tokens + (REASONING_HEADROOM if token_field == "max_completion_tokens" else 0)
     payload = {"model": model, "messages": [{"role": "user", "content": content}],
-               token_field: req.max_tokens}
+               token_field: limit}
     if req.temperature != 1.0 and model not in _FIXED_TEMPERATURE:
         payload["temperature"] = req.temperature
     try:
@@ -135,16 +191,42 @@ def _openai(model: str, req: Request) -> str:
 # --------------------------------------------------------------- Anthropic shape
 
 
-def _messages(url: str, headers: dict, model: str, req: Request) -> str:
+def _messages_payload(model: str | None, req: Request) -> dict:
     content: list[dict] = []
     for png in req.images:
         content.append({"type": "image",
                         "source": {"type": "base64", "media_type": "image/png", "data": _b64(png)}})
     content.append({"type": "text", "text": req.prompt})
-    payload = {"model": model, "max_tokens": req.max_tokens, "temperature": req.temperature,
+    payload = {"max_tokens": req.max_tokens, "temperature": req.temperature,
                "messages": [{"role": "user", "content": content}]}
-    data = _post(url, {**headers, "anthropic-version": "2023-06-01"}, payload)
+    if model:
+        payload["model"] = model
+    return payload
+
+
+def _post_messages(url: str, headers: dict, payload: dict, model: str) -> dict:
+    """POST a Messages body; drop `temperature` for models that reject it (Claude 5.x)."""
+    if model in _FIXED_TEMPERATURE:
+        payload.pop("temperature", None)
+    try:
+        return _post(url, headers, payload)
+    except BackendError as e:
+        if "temperature" not in str(e) or "temperature" not in payload:
+            raise
+        print(f"  ! {model} rejects temperature; using its default from now on", file=sys.stderr)
+        _FIXED_TEMPERATURE.add(model)
+        payload.pop("temperature")
+        return _post(url, headers, payload)
+
+
+def _messages_text(data: dict) -> str:
     return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+
+
+def _messages(url: str, headers: dict, model: str, req: Request) -> str:
+    data = _post_messages(url, {**headers, "anthropic-version": "2023-06-01"},
+                          _messages_payload(model, req), model)
+    return _messages_text(data)
 
 
 def _foundry_anthropic_base() -> str:
@@ -159,13 +241,50 @@ def _foundry_anthropic_base() -> str:
 
 
 def _azure_anthropic(model: str, req: Request) -> str:
-    key = _env("AZURE_ANTHROPIC_KEY", "ANTHROPIC_FOUNDRY_API_KEY")
-    return _messages(f"{_foundry_anthropic_base()}/v1/messages", {"x-api-key": key}, model, req)
+    key = os.environ.get("AZURE_ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_FOUNDRY_API_KEY")
+    if key:
+        auth = {"x-api-key": key}
+    else:  # Entra ID, as anthropic.AnthropicFoundry does with DefaultAzureCredential
+        auth = {"Authorization": "Bearer " + _cli_token("az", [
+            "az", "account", "get-access-token", "--resource",
+            "https://cognitiveservices.azure.com", "--query", "accessToken", "-o", "tsv"])}
+    return _messages(f"{_foundry_anthropic_base()}/v1/messages", auth, model, req)
 
 
 def _anthropic(model: str, req: Request) -> str:
     base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
     return _messages(f"{base}/v1/messages", {"x-api-key": _env("ANTHROPIC_API_KEY")}, model, req)
+
+
+# ------------------------------------------------------------------ Vertex (Gemini)
+
+
+def _vertex_base(publisher: str, model: str) -> str:
+    project = _env("VERTEX_PROJECT")
+    loc = os.environ.get("VERTEX_LOCATION", "global")
+    host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
+    return f"https://{host}/v1/projects/{project}/locations/{loc}/publishers/{publisher}/models/{model}"
+
+
+def _vertex_anthropic(model: str, req: Request) -> str:
+    payload = {"anthropic_version": "vertex-2023-10-16", **_messages_payload(None, req)}
+    data = _post_gcloud(f"{_vertex_base('anthropic', model)}:rawPredict", payload,
+                        lambda u, h, p: _post_messages(u, h, p, model))
+    return _messages_text(data)
+
+
+def _vertex(model: str, req: Request) -> str:
+    url = f"{_vertex_base('google', model)}:generateContent"
+    parts: list[dict] = [{"inlineData": {"mimeType": "image/png", "data": _b64(png)}}
+                         for png in req.images]
+    parts.append({"text": req.prompt})
+    payload = {"contents": [{"role": "user", "parts": parts}],
+               "generationConfig": {"temperature": req.temperature,
+                                    "maxOutputTokens": req.max_tokens + REASONING_HEADROOM}}
+    data = _post_gcloud(url, payload)
+    cands = data.get("candidates") or [{}]
+    return "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", [])
+                   if not p.get("thought"))
 
 
 # ---------------------------------------------------------------------- offline
@@ -192,6 +311,8 @@ ROUTES = {
     "azure-foundry": _azure_foundry,
     "openai": _openai,
     "anthropic": _anthropic,
+    "vertex": _vertex,
+    "vertex-anthropic": _vertex_anthropic,
     "dummy": _dummy,
 }
 

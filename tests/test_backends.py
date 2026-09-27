@@ -35,7 +35,7 @@ def test_azure_anthropic_uses_native_messages_route(captured, monkeypatch):
 def test_azure_openai_uses_v1_route_with_data_url(captured, monkeypatch):
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://r.openai.azure.com/")
     monkeypatch.setenv("AZURE_OPENAI_KEY", "k")
-    chat.complete("azure-openai:gpt-5.4", REQ)
+    chat.complete("azure-openai:gpt-5.6-sol", REQ)
     assert captured["url"] == "https://r.openai.azure.com/openai/v1/chat/completions"
     img = captured["payload"]["messages"][0]["content"][1]
     assert img["image_url"]["url"].startswith("data:image/png;base64,")
