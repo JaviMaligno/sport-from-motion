@@ -99,10 +99,13 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--state-format", default="text", choices=["text", "json"],
                    help="typed-decision models only: send the coordinates as text or JSON")
     r.add_argument("--workers", type=int, default=1, help="concurrent requests")
+    r.add_argument("--replicate", type=int, default=1,
+                   help="replicate index K: K > 1 is an independent re-run of the same cell "
+                        "(own file, suffix __rK; never reuses another replicate's answers)")
     r.set_defaults(func=lambda a: print(pipeline.run_model(
         a.items, a.model, condition=a.condition, rep=a.repr, limit=a.limit,
         max_tokens=a.max_tokens, temperature=a.temperature, state_format=a.state_format,
-        workers=a.workers)))
+        workers=a.workers, replicate=a.replicate)))
 
     b = sub.add_parser("baseline", help="nuisance / tempo / kinematic feature classifiers")
     b.add_argument("--items", required=True)
@@ -147,6 +150,13 @@ def _name(model: str, width: int = 34) -> str:
     return model if len(model) <= width else model[:width - 17] + ".." + model[-15:]
 
 
+def _var(s: dict) -> str:
+    """Prompt style + replicate of a run, blank for the default (neutral, replicate 1)."""
+    parts = ([] if s.get("prompt_style", "neutral") == "neutral" else [s["prompt_style"][:3]]) + \
+        ([] if s.get("replicate", 1) == 1 else [f"r{s['replicate']}"])
+    return "/".join(parts)
+
+
 def _short(sport: str) -> str:
     return sport.replace("american_football", "am_football")[:11]
 
@@ -160,20 +170,30 @@ def _report(a) -> None:
           + (f"  tag={rep['tag']}" if rep["tag"] else ""))
     # acc = accuracy; bal = balanced accuracy; F1 = macro-F1; kappa = Cohen's kappa;
     # pc-acc = prior-corrected accuracy (response bias removed, leave-one-match-out)
-    print(f"{'model':34} {'condition':15} {'repr':8} {'n':>4} {'acc':>5} {'95% CI':>12} "
+    print(f"{'model':34} {'condition':15} {'repr':8} {'var':6} {'n':>4} {'acc':>5} {'95% CI':>12} "
           f"{'bal':>5} {'F1':>5} {'kappa':>6} {'pc-acc':>6} {'95% CI':>12} {'logloss':>7}")
     for s in rep["runs"].values():
-        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} {s['n']:4d} "
+        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} {_var(s):6} {s['n']:4d} "
               f"{s['accuracy']:5.2f} {_fmt_ci(s['accuracy_ci']):>12} {s['balanced_accuracy']:5.2f} "
               f"{s['macro_f1']:5.2f} {s['kappa']:6.2f} {s['prior_corrected_accuracy']:6.2f} "
               f"{_fmt_ci(s['prior_corrected_accuracy_ci']):>12} {s['log_loss']:7.3f}")
     cls = rep["candidates"]
     print("\nper-class recall (95% CI in the JSON output):")
-    print(f"{'model':34} {'condition':15} {'repr':8} " + " ".join(f"{_short(c):>11}" for c in cls))
+    print(f"{'model':34} {'condition':15} {'repr':8} {'var':6} " + " ".join(f"{_short(c):>11}" for c in cls))
     for s in rep["runs"].values():
         rec = s.get("per_class_recall", {})
-        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} "
+        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} {_var(s):6} "
               + " ".join(f"{rec[c]:11.2f}" if c in rec else f"{'-':>11}" for c in cls))
+    if rep.get("replicates"):
+        print("\nreplicates (clips answered in every replicate; contrasts use the per-item mean):")
+        for g in rep["replicates"]:
+            print(f"  {_name(g['model']):34} {g['cell']:24} K={g['k']} n={g['n_common']:<4d} "
+                  f"acc {g['mean_accuracy']:.2f} {_fmt_ci(g['mean_accuracy_ci'])} "
+                  f"SD {g['sd_between_replicates']:.3f}  agreement {g['agreement']:.2f}")
+    if rep.get("ignored", {}).get("rows_not_in_items"):
+        ig = rep["ignored"]
+        print(f"\nignored {ig['rows_not_in_items']} prediction rows of clips not in the current "
+              f"items ({len(ig['files'])} files)")
     if rep["contrasts"]:
         print("\npaired contrasts (accuracy difference, match-clustered CI):")
         for c in rep["contrasts"]:

@@ -251,3 +251,33 @@ def holm(pvals: list[float]) -> list[float]:
         running = max(running, min(1.0, (m - rank) * pvals[i]))
         out[i] = running
     return out
+
+
+def replicate_summary(replicates: list[list[dict]], n_boot: int = 2000, seed: int = 0) -> dict:
+    """K runs of the same cell: how much of a result is sampling noise of the model.
+
+    Only clips answered in *every* replicate are used, so the replicates are compared
+    on identical items. Returns the mean and between-replicate SD of accuracy, the
+    per-item agreement rate (all K labels equal), the accuracy of the per-item mean
+    correctness with its match-clustered CI, and those averaged rows (`rows`, with a
+    float `correct`) for the paired contrasts.
+    """
+    by_clip = [{r["clip_id"]: r for r in rep} for rep in replicates]
+    common = sorted(set.intersection(*(set(b) for b in by_clip))) if by_clip else []
+    accs = [float(np.mean([b[c].get("label") == b[c]["sport"] for c in common]))
+            if common else float("nan") for b in by_clip]
+    agree = [len({b[c].get("label") or NONE for b in by_clip}) == 1 for c in common]
+    rows = [{"clip_id": c, "match_id": by_clip[0][c]["match_id"], "sport": by_clip[0][c]["sport"],
+             "correct": float(np.mean([b[c].get("label") == b[c]["sport"] for b in by_clip]))}
+            for c in common]
+    mean = float(np.mean([r["correct"] for r in rows])) if rows else float("nan")
+    ci = (float("nan"), float("nan"))
+    if rows and n_boot:
+        idx, counts = boot_counts([r["match_id"] for r in rows], n_boot, seed)
+        ci = _ci(_wmean(np.array([r["correct"] for r in rows]), counts[:, idx]))
+    return {"k": len(replicates), "n_common": len(common),
+            "n_per_replicate": [len(b) for b in by_clip], "accuracy_per_replicate": accs,
+            "mean_accuracy": mean, "mean_accuracy_ci": ci,
+            "sd_between_replicates": float(np.std(accs, ddof=1)) if len(accs) > 1 and common
+            else float("nan"),
+            "agreement": float(np.mean(agree)) if agree else float("nan"), "rows": rows}

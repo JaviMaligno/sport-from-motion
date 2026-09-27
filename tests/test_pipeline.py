@@ -88,3 +88,55 @@ def test_interleave_balances_any_prefix_and_is_condition_independent():
     assert sum(i["sport"] == "a" for i in out[:10]) == 5
     assert len({i["match_id"] for i in out[:6]}) == 6  # spreads across matches too
     assert [i["clip_id"] for i in out] == [i["clip_id"] for i in interleave(items("shuffled")[::-1])]
+
+
+def _coin(seed=0):
+    """Fake chat model answering at random (different in every replicate)."""
+    import random
+
+    rnd = random.Random(seed)
+
+    def complete(model_id, req):
+        opts = ["rugby union", "association football (soccer)"]
+        a = rnd.choice(opts)
+        return json.dumps({"probabilities": {o: float(o == a) for o in opts}, "answer": a})
+    return complete
+
+
+def test_replicates_have_own_files_and_are_grouped(prepared):
+    calls = []
+
+    def counting(model_id, req, _c=_coin(1)):
+        calls.append(1)
+        return _c(model_id, req)
+
+    p1 = pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", complete=counting)
+    p2 = pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet",
+                            complete=counting, replicate=2, limit=10)
+    assert p1.name == "fake__m__motion__sheet.jsonl" and p2.name == "fake__m__motion__sheet__r2.jsonl"
+    assert len(calls) == 24 + 10  # replicate 2 did not reuse replicate 1's answers
+    assert all(json.loads(line)["replicate"] == 2 for line in p2.read_text().splitlines())
+    pipeline.run_model(str(prepared), "fake:m", condition="motion_shuffled", rep="sheet",
+                       complete=_coin(2))
+    rep = pipeline.report(str(prepared), n_boot=50)
+    (g,) = rep["replicates"]
+    assert g["k"] == 2 and g["n_common"] == 10 and 0 <= g["agreement"] <= 1
+    assert g["mean_accuracy"] == pytest.approx(sum(g["accuracy_per_replicate"]) / 2)
+    c = next(c for c in rep["contrasts"] if c["b"] == "motion_shuffled/sheet")
+    assert c["n"] == 10  # only items present in every replicate
+
+
+def test_report_ignores_stale_clips_and_missing_cells(prepared):
+    pdir = prepared / "predictions"
+    pdir.mkdir(exist_ok=True)
+    stale = {"item_id": "gone__motion__sheet", "clip_id": "gone", "sport": "soccer",
+             "match_id": "x", "tags": [], "model": "old:m", "condition": "motion",
+             "repr": "sheet", "label": "soccer", "probs": {"soccer": 1.0}, "error": None}
+    (pdir / "old__m__motion__sheet.jsonl").write_text(json.dumps(stale) + "\n")
+    # a model with a single, non-motion cell: nothing to contrast, must not crash
+    pipeline.run_model(str(prepared), "fake:solo", condition="formation", rep="text",
+                       complete=_coin(3), limit=4)
+    rep = pipeline.report(str(prepared), n_boot=20)
+    assert rep["ignored"]["rows_not_in_items"] == 1
+    assert not any(r["model"] == "old:m" for r in rep["runs"].values())
+    assert not any(c["model"] == "fake:solo" for c in rep["contrasts"])

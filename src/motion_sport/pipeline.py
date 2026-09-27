@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import pathlib
+import re
 import threading
 import zlib
 from collections import Counter, defaultdict
@@ -196,9 +197,13 @@ def load_items(items_dir: str | pathlib.Path) -> list[dict]:
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
 
-def _pred_path(items_dir, name: str, condition: str, rep: str) -> pathlib.Path:
+def _pred_path(items_dir, name: str, condition: str, rep: str, *, prompt_style: str = "neutral",
+               replicate: int = 1) -> pathlib.Path:
+    """predictions/<model>__<condition>__<repr>[__informed][__r<K>].jsonl (K > 1 only)."""
     safe = name.replace(":", "__").replace("/", "_")
-    return pathlib.Path(items_dir) / "predictions" / f"{safe}__{condition}__{rep}.jsonl"
+    suffix = ("" if prompt_style == "neutral" else f"__{prompt_style}") + \
+        ("" if replicate == 1 else f"__r{replicate}")
+    return pathlib.Path(items_dir) / "predictions" / f"{safe}__{condition}__{rep}{suffix}.jsonl"
 
 
 def interleave(items: list[dict]) -> list[dict]:
@@ -229,8 +234,12 @@ def interleave(items: list[dict]) -> list[dict]:
 def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
               limit: int | None = None, max_tokens: int = 1024, temperature: float = 0.0,
               state_format: str = "text", complete=None, decide=None,
-              workers: int = 1) -> pathlib.Path:
+              workers: int = 1, replicate: int = 1) -> pathlib.Path:
     """Query one model on every matching item. Resumable: skips done items.
+
+    `replicate` K > 1 is an independent repetition of the same cell: its own file
+    (suffix `__r<K>`), so it never reuses another replicate's answers. The items are
+    the same in every replicate (`interleave` fixes the order, `limit` the prefix).
 
     Chat models (backends/chat.py) get the full prompt and the images. Typed-decision
     models (backends/decision.py: Jev, Laya) get instructions + criteria + a state,
@@ -247,6 +256,8 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
         raise ValueError(f"{model_id} reads text only: use --repr text")
     if state_format not in ("text", "json"):
         raise ValueError(state_format)
+    if replicate < 1:
+        raise ValueError(f"replicate must be >= 1, got {replicate}")
     root = pathlib.Path(items_dir)
     cands = json.loads((root / "config.json").read_text())["candidates"]
     items = [i for i in load_items(root) if i["condition"] == condition and i["repr"] == rep]
@@ -255,7 +266,7 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
     items = interleave(items)
     items = items[:limit] if limit else items
     name = model_id + ("" if not is_decision or state_format == "text" else "+json")
-    path = _pred_path(root, name, condition, rep)
+    path = _pred_path(root, name, condition, rep, replicate=replicate)
     path.parent.mkdir(parents=True, exist_ok=True)
     done = {}
     if path.exists():
@@ -283,7 +294,8 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
                                "error": f"{type(e).__name__}: {e}"[:300]}
         rec = {"item_id": it["item_id"], "clip_id": it["clip_id"], "sport": it["sport"],
                "match_id": it["match_id"], "tags": it["tags"], "model": name,
-               "condition": condition, "repr": rep, "raw": raw[:2000], **parsed}
+               "condition": condition, "repr": rep, "replicate": replicate,
+               "raw": raw[:2000], **parsed}
         with lock:
             fh.write(json.dumps(rec) + "\n")
             fh.flush()
@@ -378,37 +390,87 @@ def _write_clip_preds(root, name, clips, pred, probs, condition="all", rep="feat
     return path
 
 
+CellKey = tuple  # (model, condition, repr, prompt_style)
+
+
+def _file_meta(path: pathlib.Path, rows: list[dict]) -> dict:
+    """Cell + replicate of one prediction file; older files lack the newer fields."""
+    first = rows[0]
+    m = re.search(r"__r(\d+)$", path.stem)
+    style = first.get("prompt_style") or ("informed" if "__informed" in path.stem else "neutral")
+    return {"model": first.get("model", path.stem), "condition": first.get("condition", "?"),
+            "repr": first.get("repr", "?"), "prompt_style": style,
+            "replicate": int(first.get("replicate") or (m.group(1) if m else 1))}
+
+
+def _cell_label(cond: str, rep: str, style: str) -> str:
+    return f"{cond}/{rep}" + ("" if style == "neutral" else f"[{style}]")
+
+
+def _contrast_pairs(cells: dict) -> list[tuple[CellKey, CellKey]]:
+    """Every (a, b) pair of cells of one model worth a paired contrast."""
+    pairs = []
+    for (model, cond, rep, style) in cells:
+        if cond == "motion":
+            # condition contrasts only within one representation and prompt: text vs
+            # another condition's image would mix RQ1/RQ2 with RQ4
+            for other in ("motion_shuffled", "formation", "kinematics", "kinematics_solo"):
+                pairs.append(((model, cond, rep, style), (model, other, rep, style)))
+        if cond == "kinematics":  # the value of collective motion
+            pairs.append(((model, cond, rep, style), (model, "kinematics_solo", rep, style)))
+        if rep == "text":  # RQ4: same condition, text vs image
+            pairs.append(((model, cond, rep, style), (model, cond, "sheet", style)))
+        if style != "neutral":  # does telling the model what to look for help?
+            pairs.append(((model, cond, rep, style), (model, cond, rep, "neutral")))
+    return [(a, b) for a, b in pairs if a in cells and b in cells]
+
+
 def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
-    """Summaries for every prediction file + the two paired contrasts per model."""
-    from motion_sport.evaluate import paired_difference, summarize
+    """Summaries for every prediction file, replicate groups and paired contrasts.
+
+    Robust by design: rows of clips that are not in the current items are ignored
+    (e.g. predictions left over from an older `prepare`), and contrasts are only
+    computed between cells that exist, so a model with missing cells never breaks it.
+    """
+    from motion_sport.evaluate import paired_difference, replicate_summary, summarize
 
     root = pathlib.Path(items_dir)
     cands = json.loads((root / "config.json").read_text())["candidates"]
-    runs = {}
+    known = {i["clip_id"] for i in load_items(root)} if (root / "items.jsonl").exists() else None
+    runs, ignored = {}, {"rows_not_in_items": 0, "files": []}
     for p in sorted((root / "predictions").glob("*.jsonl")):
         rows = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+        if known is not None:
+            kept = [r for r in rows if r.get("clip_id") in known]
+            if len(kept) < len(rows):
+                ignored["rows_not_in_items"] += len(rows) - len(kept)
+                ignored["files"].append(p.name)
+            rows = kept
         if tag:
             rows = [r for r in rows if tag in r.get("tags", [])]
         if rows:
-            runs[p.stem] = {"meta": {k: rows[0][k] for k in ("model", "condition", "repr")},
-                            "rows": rows, "summary": summarize(rows, cands, n_boot)}
-    contrasts = []
-    by_key = {(v["meta"]["model"], v["meta"]["condition"], v["meta"]["repr"]): v["rows"]
-              for v in runs.values()}
-    for (model, cond, rep), rows in by_key.items():
-        if cond != "motion":
+            runs[p.stem] = {"meta": _file_meta(p, rows), "rows": rows,
+                            "summary": summarize(rows, cands, n_boot)}
+    # cells: one or more replicates of the same (model, condition, repr, prompt style)
+    reps: dict[CellKey, dict[int, list[dict]]] = defaultdict(dict)
+    for v in runs.values():
+        m = v["meta"]
+        reps[(m["model"], m["condition"], m["repr"], m["prompt_style"])][m["replicate"]] = v["rows"]
+    cells, replicates = {}, []
+    for key, by_rep in reps.items():
+        if len(by_rep) == 1:
+            cells[key] = next(iter(by_rep.values()))
             continue
-        # condition contrasts only within one representation: text vs another condition's
-        # image would mix RQ1/RQ2 with RQ4
-        for other in ("motion_shuffled", "formation", "kinematics", "kinematics_solo"):
-            if (model, other, rep) in by_key:
-                contrasts.append({"model": model, "a": f"motion/{rep}", "b": f"{other}/{rep}",
-                                  **paired_difference(rows, by_key[(model, other, rep)], n_boot)})
-    # RQ4: same condition, text vs image
-    for (model, cond, rep), rows in by_key.items():
-        if rep == "text" and (model, cond, "sheet") in by_key:
-            contrasts.append({"model": model, "a": f"{cond}/text", "b": f"{cond}/sheet",
-                              **paired_difference(rows, by_key[(model, cond, "sheet")], n_boot)})
+        summ = replicate_summary([by_rep[k] for k in sorted(by_rep)], n_boot)
+        cells[key] = summ.pop("rows")  # per-item correctness averaged over replicates
+        model, cond, rep, style = key
+        replicates.append({"model": model, "cell": _cell_label(cond, rep, style),
+                           "condition": cond, "repr": rep, "prompt_style": style,
+                           "replicates": sorted(by_rep), **summ})
+    contrasts = []
+    for a, b in _contrast_pairs(cells):
+        contrasts.append({"model": a[0], "a": _cell_label(*a[1:]), "b": _cell_label(*b[1:]),
+                          **paired_difference(cells[a], cells[b], n_boot)})
     return {"candidates": cands, "tag": tag,
             "runs": {k: {**v["meta"], **v["summary"]} for k, v in runs.items()},
-            "contrasts": contrasts}
+            "replicates": replicates, "contrasts": contrasts, "ignored": ignored}
