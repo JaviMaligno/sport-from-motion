@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 import pytest
 
 from motion_sport import pipeline
@@ -188,3 +189,28 @@ def test_informed_criteria_reach_decision_models(prepared):
     pipeline.run_model(str(prepared), "jev:x", condition="motion", rep="text", decide=decide,
                        prompt_style="informed", limit=2)
     assert len(got) == 2 and all(":" in v for crit in got for v in crit.values())
+
+
+def test_prepare_player_mode_random(tmp_path):
+    from motion_sport import cli
+    from motion_sport.schema import load_clips
+
+    for c in make_toy_clips(4, seconds=6):
+        c.save(tmp_path / "clips")
+    outs = {}
+    for mode in ("central", "random"):
+        out = tmp_path / mode
+        cli.main(["prepare", "--clips", str(tmp_path / "clips"), "--out", str(out),
+                  "--conditions", "motion", "--reprs", "text", "--n-players", "6",
+                  "--player-mode", mode])
+        assert json.loads((out / "config.json").read_text())["controls"]["player_mode"] == mode
+        outs[mode] = load_clips(out / "clips")
+        for c in outs[mode]:
+            log = next(x for x in c.meta["controls"] if x["name"] == "fix_player_count")
+            assert log == {"name": "fix_player_count", "n": 6, "mode": mode}
+    # different subsets: at least one clip keeps other players
+    assert any(not np.allclose(np.sort(a.xy.ravel()), np.sort(b.xy.ravel()))
+               for a, b in zip(outs["central"], outs["random"]))
+    with pytest.raises(ValueError):
+        pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "x"), conditions=["motion"],
+                         reprs=["text"], player_mode="nearest")

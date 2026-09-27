@@ -80,11 +80,17 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
             conditions: list[str], reprs: list[str], per_sport: int | None = None,
             candidates: list[str] | None = None, frames_per_view: int = 8,
             image_size: int = 320, seed: int = 0,
-            n_players: int | None = None) -> pathlib.Path:
+            n_players: int | None = None, player_mode: str | None = None) -> pathlib.Path:
     cfg = PRESETS[preset]
     if n_players and cfg.n_players:
         # N must not exceed the smallest roster in the comparison (10 in basketball)
         cfg = dc_replace(cfg, n_players=n_players)
+    if player_mode:
+        # "central" keeps the N most central players; "random" a uniform subset, so a
+        # sport whose whole roster fits in N is not the only one seen complete
+        if player_mode not in ("central", "random"):
+            raise ValueError(f"player_mode must be central or random, got {player_mode!r}")
+        cfg = dc_replace(cfg, player_mode=player_mode)
     out = pathlib.Path(out_dir)
     (out / "clips").mkdir(parents=True, exist_ok=True)
     raw = balanced_sample(load_clips(clips_dir), per_sport, seed)
