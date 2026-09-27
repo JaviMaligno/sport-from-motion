@@ -28,7 +28,8 @@ def _ingest(a) -> None:
         clips = loaders.load_long_csv(
             a.input, sport=a.sport, source=a.name or pathlib.Path(a.input).stem, fps=a.fps,
             target_fps=a.target_fps, columns=json.loads(a.columns) if a.columns else None,
-            unit_scale=a.unit_scale, tags=a.tags.split(",") if a.tags else None, **kw)
+            unit_scale=a.unit_scale, tags=a.tags.split(",") if a.tags else None,
+            group_extra=a.group_extra.split(",") if a.group_extra else None, **kw)
     else:
         sys.exit(f"unknown source {a.source}")
     n = 0
@@ -56,6 +57,8 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--columns", help='long-csv: JSON mapping, e.g. {"frame":"frame_id","track":"id"}')
     g.add_argument("--unit-scale", type=float, default=1.0, help="to metres (yards 0.9144, feet 0.3048)")
     g.add_argument("--tags", help="long-csv: comma-separated tags for every clip")
+    g.add_argument("--group-extra", help="long-csv: extra columns that split a match into "
+                   "continuous streams (e.g. segment, playId)")
     g.add_argument("--max-plays", type=int)
     g.add_argument("--n-toy", type=int, default=20)
     g.add_argument("--seed", type=int, default=0)

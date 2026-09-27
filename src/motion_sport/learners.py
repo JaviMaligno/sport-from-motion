@@ -30,13 +30,17 @@ FitPredict = Callable[[np.ndarray, np.ndarray], tuple[list[str], np.ndarray]]
 
 def grouped_oof(y: list[str], groups: list[str], fit_predict: FitPredict,
                 n_splits: int = 5) -> tuple[list[str], list[dict[str, float]]]:
-    """Out-of-fold predictions with GroupKFold by match.
+    """Out-of-fold predictions, grouped by match and stratified by sport.
 
     Grouping by match is not optional: clips from one match share players and
     conditions, and a random split would let a model recognise the match instead
-    of the sport.
+    of the sport. Stratification matters when a sport has few, large groups (one
+    handball match split into halves): plain GroupKFold then builds folds whose
+    test sport is under-represented in training, and a classifier with no signal
+    predicts the training majority, i.e. systematically the wrong class
+    (nuisance baseline at 0.00 instead of chance).
     """
-    from sklearn.model_selection import GroupKFold
+    from sklearn.model_selection import StratifiedGroupKFold
 
     y_arr = np.asarray(y)
     classes = sorted(set(y))
@@ -47,7 +51,7 @@ def grouped_oof(y: list[str], groups: list[str], fit_predict: FitPredict,
         raise ValueError("need at least 2 matches for grouped cross-validation")
     pred = [""] * len(y)
     probs: list[dict[str, float]] = [{} for _ in y]
-    for train, test in GroupKFold(n_splits=splits).split(np.zeros(len(y)), y_arr, groups):
+    for train, test in StratifiedGroupKFold(n_splits=splits, shuffle=True, random_state=0).split(np.zeros(len(y)), y_arr, groups):
         if len(set(y_arr[train])) < 2:
             continue
         fold_classes, p = fit_predict(train, test)
@@ -64,7 +68,10 @@ def _logistic(X_train, y_train, X_test, seed: int = 0, C: float = 1.0):
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=3000, C=C, random_state=seed))
+    # balanced weights: with few, large groups per sport the class mix of a training
+    # fold drifts, and an unweighted fit would predict that drift, not the features
+    clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=3000, C=C, random_state=seed,
+                                                             class_weight="balanced"))
     clf.fit(X_train, y_train)
     return list(clf.classes_), clf.predict_proba(X_test)
 

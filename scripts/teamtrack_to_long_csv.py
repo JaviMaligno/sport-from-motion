@@ -1,0 +1,83 @@
+"""TeamTrack (Kaggle atomscott/teamtrack) trajectories -> long CSV per sport.
+
+`teamtrack-trajectory/<Sport>/<split>/<segment>_<k>.txt` are sliding windows of 240
+rows x (2 * n_players) columns, pitch coordinates in metres, consecutive windows
+shifted by 12 rows with a stable player order. Each 30 s segment is rebuilt by
+downloading only the windows needed to cover it (0, 20, 40, ... and the last one),
+not all ~56. Match ids: soccer F_<date>; handball <half> (one match, so halves are
+the only grouping); basketball P3 (one match).
+
+    python scripts/teamtrack_to_long_csv.py <file_list.txt> data/raw/teamtrack
+    -> data/raw/teamtrack/{soccer,handball,basketball}.csv
+Needs the kaggle package and ~/.kaggle/access_token.
+"""
+from __future__ import annotations
+
+import csv
+import pathlib
+import re
+import sys
+from collections import defaultdict
+
+import numpy as np
+
+WIN, STEP = 240, 12
+SPORT = {"Soccer": "soccer", "Handball": "handball", "Basketball": "basketball"}
+
+
+def main() -> None:
+    from kaggle.api.kaggle_api_extended import KaggleApi
+
+    names = [n.strip() for n in pathlib.Path(sys.argv[1]).read_text().split() if n.strip()]
+    out = pathlib.Path(sys.argv[2])
+    cache = out / "windows"
+    cache.mkdir(parents=True, exist_ok=True)
+    segs: dict[tuple[str, str, str], dict[int, str]] = defaultdict(dict)
+    for n in names:
+        parts = n.split("/")
+        sport, split, fname = parts[-3], parts[-2], parts[-1]
+        m = re.match(r"(.+)_(\d+)\.txt$", fname)
+        segs[(sport, split, m.group(1))][int(m.group(2))] = n
+    api = KaggleApi()
+    api.authenticate()
+    writers, fhs = {}, []
+    for (sport, split, seg), wins in sorted(segs.items()):
+        last = max(wins)
+        need = sorted(set(range(0, last + 1, WIN // STEP)) | {last})
+        arrays = {}
+        for k in need:
+            local = cache / sport / split / pathlib.Path(wins[k]).name
+            if not local.exists():
+                local.parent.mkdir(parents=True, exist_ok=True)
+                api.dataset_download_file("atomscott/teamtrack", wins[k], path=str(local.parent),
+                                          quiet=True)
+            arrays[k] = np.loadtxt(local, delimiter=",", ndmin=2)
+        n_rows = last * STEP + WIN
+        xy = np.full((n_rows, arrays[0].shape[1]), np.nan)
+        for k, a in arrays.items():
+            xy[k * STEP:k * STEP + len(a)] = a
+        if np.isnan(xy).any():
+            print(f"skip {sport}/{seg}: gaps after stitching", file=sys.stderr)
+            continue
+        if sport == "Soccer":
+            match = seg.split("_")[1]
+        elif sport == "Handball":
+            match = seg.split("_")[0]
+        else:
+            match = seg.split("_")[0]
+        sp = SPORT[sport]
+        if sp not in writers:
+            fh = (out / f"{sp}.csv").open("w", newline="")
+            fhs.append(fh)
+            writers[sp] = csv.writer(fh)
+            writers[sp].writerow(["match_id", "segment", "frame", "track_id", "x", "y"])
+        for f in range(n_rows):
+            for j in range(xy.shape[1] // 2):
+                writers[sp].writerow([match, f"{split}-{seg}", f, j, xy[f, 2 * j], xy[f, 2 * j + 1]])
+        print(f"{sp} {split}/{seg}: {n_rows} frames, {xy.shape[1] // 2} players, {len(need)} files")
+    for fh in fhs:
+        fh.close()
+
+
+if __name__ == "__main__":
+    main()
