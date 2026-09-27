@@ -157,6 +157,11 @@ def _fmt_ci(ci) -> str:
     return f"[{ci[0]:.2f}, {ci[1]:.2f}]"
 
 
+def _few(c: dict) -> str:
+    """Why a contrast has no CI/p: too few matches for the cluster bootstrap."""
+    return f", only {c['n_matches']} matches" if c.get("too_few_matches") else ""
+
+
 def _name(model: str, width: int = 34) -> str:
     """Fit a model id in `width` keeping both ends (route and variant suffix)."""
     return model if len(model) <= width else model[:width - 17] + ".." + model[-15:]
@@ -213,12 +218,13 @@ def _report(a) -> None:
         for c in rep["primary_contrasts"]:
             print(f"  {_name(c['model']):34} {c['contrast']:17} {c['a']} - {c['b']}: "
                   f"{c['diff']:+.2f} {_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])} "
-                  f"p_holm={_fmt_p(c['p_holm'])}{' *' if c['significant'] else ''}  (n={c['n']})")
+                  f"p_holm={_fmt_p(c['p_holm'])}{' *' if c['significant'] else ''}  (n={c['n']}"
+                  f"{_few(c)})")
     if rep.get("secondary_contrasts"):
         print("\nsecondary contrasts (exploratory; raw p, not corrected):")
         for c in rep["secondary_contrasts"]:
             print(f"  {_name(c['model']):34} {c['a']} - {c['b']}: {c['diff']:+.2f} "
-                  f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']})")
+                  f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']}{_few(c)})")
 
 if __name__ == "__main__":
     main()

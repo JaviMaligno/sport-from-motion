@@ -221,23 +221,35 @@ def bootstrap_p(vals: np.ndarray) -> float:
     return float(min(1.0, 2 * min(lo, hi)))
 
 
+# Below this many matches the cluster bootstrap has (almost) no between-match variance:
+# its CI collapses to a point and p hits 2/(B+1) on a single match's evidence.
+MIN_MATCHES = 5
+
+
 def paired_difference(a: list[dict], b: list[dict], n_boot: int = 2000, seed: int = 0) -> dict:
     """Accuracy(a) - accuracy(b) on the clips both conditions share, match-clustered.
 
     Used for motion vs. motion_shuffled (does order matter?) and motion vs.
     formation (does motion add anything over a single frame?). Returns the
     difference, its percentile CI and a two-sided bootstrap p-value (same draws).
+    With fewer than `MIN_MATCHES` matches the CI and p are NaN (Holm skips them)
+    and `too_few_matches` is set.
     """
     ia = {r["clip_id"]: r for r in a}
     ib = {r["clip_id"]: r for r in b}
     common = sorted(set(ia) & set(ib))
     d = np.array([_correct(ia[c]) - _correct(ib[c]) for c in common])
     diff = float(d.mean()) if len(d) else float("nan")
-    if not len(d):
-        return {"n": 0, "diff": diff, "ci": (float("nan"), float("nan")), "p": float("nan")}
-    idx, counts = boot_counts([ia[c]["match_id"] for c in common], n_boot, seed)
+    match_ids = [ia[c]["match_id"] for c in common]
+    n_matches = len(set(match_ids))
+    out = {"n": len(d), "n_matches": n_matches, "diff": diff,
+           "ci": (float("nan"), float("nan")), "p": float("nan"),
+           "too_few_matches": n_matches < MIN_MATCHES}
+    if out["too_few_matches"]:
+        return out
+    idx, counts = boot_counts(match_ids, n_boot, seed)
     vals = _wmean(d, counts[:, idx])
-    return {"n": len(d), "diff": diff, "ci": _ci(vals), "p": bootstrap_p(vals)}
+    return {**out, "ci": _ci(vals), "p": bootstrap_p(vals)}
 
 
 def holm(pvals: list[float]) -> list[float]:

@@ -209,6 +209,9 @@ Todos sobre **exactamente los mismos ítems**.
   frente a imagen y prompt informado frente a neutro, en `sheet`. Holm sobre todos los
   primarios de todos los modelos del informe; el resto de contrastes es exploratorio y
   se da con p sin corregir. El p es bilateral y sale del mismo bootstrap agrupado que el IC.
+  Con menos de 5 partidos (`evaluate.MIN_MATCHES`, p. ej. un corte por `--tag` o por
+  deporte) el bootstrap agrupado no tiene varianza entre partidos: el contraste da la
+  diferencia pero IC y p salen NaN (`too_few_matches`) y Holm no lo cuenta.
 - Réplicas (`run --replicate K`): media y DE entre réplicas, acuerdo por ítem, y
   contrastes sobre la corrección media por ítem.
 - **IC por bootstrap agrupado por partido** desde el primer día (la lección de los

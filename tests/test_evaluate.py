@@ -76,6 +76,24 @@ def test_paired_difference_p_value():
     assert paired_difference(good, half, n_boot=50)["diff"] == pytest.approx(0.5)
 
 
+
+def test_paired_difference_needs_enough_matches():
+    """One or two matches leaning the same way must not yield p ~ 2/(B+1)."""
+    def rows(n_matches, n_right):
+        return [{"clip_id": i, "match_id": i // 10, "sport": "a",
+                 "label": "a" if i % 10 < n_right else "b"} for i in range(10 * n_matches)]
+
+    for n_m in (1, 2, 4):
+        r = paired_difference(rows(n_m, 2), rows(n_m, 1), n_boot=500)
+        assert r["diff"] == pytest.approx(0.1) and r["n_matches"] == n_m
+        assert r["too_few_matches"] and r["p"] != r["p"] and r["ci"][0] != r["ci"][0]
+    r = paired_difference(rows(5, 2), rows(5, 1), n_boot=500)
+    assert not r["too_few_matches"] and r["p"] == r["p"]
+    # the NaN p of a too-small contrast stays out of the Holm family
+    few = paired_difference(rows(1, 2), rows(1, 1), n_boot=500)["p"]
+    assert holm([few, r["p"]])[1] == pytest.approx(r["p"])
+
+
 def test_holm():
     adj = holm([0.01, 0.04, 0.03, 0.005, float("nan")])
     assert adj[:4] == pytest.approx([0.03, 0.06, 0.06, 0.02])
