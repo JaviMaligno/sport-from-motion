@@ -149,6 +149,10 @@ def main(argv: list[str] | None = None) -> None:
     a.func(a)
 
 
+def _fmt_p(p: float) -> str:
+    return f"{p:.3f}" if p == p else "nan"
+
+
 def _fmt_ci(ci) -> str:
     return f"[{ci[0]:.2f}, {ci[1]:.2f}]"
 
@@ -202,11 +206,19 @@ def _report(a) -> None:
         ig = rep["ignored"]
         print(f"\nignored {ig['rows_not_in_items']} prediction rows of clips not in the current "
               f"items ({len(ig['files'])} files)")
-    if rep["contrasts"]:
-        print("\npaired contrasts (accuracy difference, match-clustered CI):")
-        for c in rep["contrasts"]:
-            print(f"  {c['model'][:38]:38} {c['a']} - {c['b']}: {c['diff']:+.2f} "
-                  f"{_fmt_ci(c['ci'])}  (n={c['n']})")
+    if rep.get("primary_contrasts"):
+        h = rep["holm"]
+        print(f"\nprimary contrasts (pre-registered; Holm across all {h['family_size']} in this "
+              f"report; * = p_holm < {h['alpha']}):")
+        for c in rep["primary_contrasts"]:
+            print(f"  {_name(c['model']):34} {c['contrast']:17} {c['a']} - {c['b']}: "
+                  f"{c['diff']:+.2f} {_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])} "
+                  f"p_holm={_fmt_p(c['p_holm'])}{' *' if c['significant'] else ''}  (n={c['n']})")
+    if rep.get("secondary_contrasts"):
+        print("\nsecondary contrasts (exploratory; raw p, not corrected):")
+        for c in rep["secondary_contrasts"]:
+            print(f"  {_name(c['model']):34} {c['a']} - {c['b']}: {c['diff']:+.2f} "
+                  f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']})")
 
 if __name__ == "__main__":
     main()

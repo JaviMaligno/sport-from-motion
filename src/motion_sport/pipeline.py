@@ -433,6 +433,18 @@ def _write_clip_preds(root, name, clips, pred, probs, condition="all", rep="feat
 
 CellKey = tuple  # (model, condition, repr, prompt_style)
 
+# Pre-registered primary contrasts (a - b), fixed before the final runs (gap A10).
+# Every model's instance of these forms ONE family per report, Holm-corrected; every
+# other contrast report computes is secondary: exploratory, raw p only.
+# Cells are (condition, repr, prompt_style).
+PRIMARY_CONTRASTS: dict[str, tuple[tuple[str, str, str], tuple[str, str, str]]] = {
+    "order": (("motion", "sheet", "neutral"), ("motion_shuffled", "sheet", "neutral")),
+    "motion_over_shape": (("motion", "sheet", "neutral"), ("formation", "sheet", "neutral")),
+    "text_vs_image": (("motion", "text", "neutral"), ("motion", "sheet", "neutral")),
+    "prompt": (("motion", "sheet", "informed"), ("motion", "sheet", "neutral")),
+}
+ALPHA = 0.05
+
 
 def _file_meta(path: pathlib.Path, rows: list[dict]) -> dict:
     """Cell + replicate of one prediction file; older files lack the newer fields."""
@@ -473,7 +485,7 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
     (e.g. predictions left over from an older `prepare`), and contrasts are only
     computed between cells that exist, so a model with missing cells never breaks it.
     """
-    from motion_sport.evaluate import paired_difference, replicate_summary, summarize
+    from motion_sport.evaluate import holm, paired_difference, replicate_summary, summarize
 
     root = pathlib.Path(items_dir)
     cands = json.loads((root / "config.json").read_text())["candidates"]
@@ -508,10 +520,21 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
         replicates.append({"model": model, "cell": _cell_label(cond, rep, style),
                            "condition": cond, "repr": rep, "prompt_style": style,
                            "replicates": sorted(by_rep), **summ})
+    primary_of = {spec: name for name, spec in PRIMARY_CONTRASTS.items()}
     contrasts = []
     for a, b in _contrast_pairs(cells):
+        name = primary_of.get((a[1:], b[1:]))
         contrasts.append({"model": a[0], "a": _cell_label(*a[1:]), "b": _cell_label(*b[1:]),
+                          "primary": name is not None, "contrast": name,
                           **paired_difference(cells[a], cells[b], n_boot)})
+    primary = [c for c in contrasts if c["primary"]]
+    for c, adj in zip(primary, holm([c["p"] for c in primary])):
+        c["p_holm"] = adj
+        c["significant"] = adj < ALPHA
     return {"candidates": cands, "tag": tag,
             "runs": {k: {**v["meta"], **v["summary"]} for k, v in runs.items()},
-            "replicates": replicates, "contrasts": contrasts, "ignored": ignored}
+            "replicates": replicates, "contrasts": contrasts,
+            "primary_contrasts": primary,
+            "secondary_contrasts": [c for c in contrasts if not c["primary"]],
+            "holm": {"family_size": sum(c["p"] == c["p"] for c in primary), "alpha": ALPHA},
+            "ignored": ignored}

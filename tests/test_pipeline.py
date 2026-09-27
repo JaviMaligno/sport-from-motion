@@ -214,3 +214,27 @@ def test_prepare_player_mode_random(tmp_path):
     with pytest.raises(ValueError):
         pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "x"), conditions=["motion"],
                          reprs=["text"], player_mode="nearest")
+
+
+def test_primary_contrasts_are_holm_corrected_as_one_family(prepared):
+    from motion_sport.evaluate import holm
+
+    for model in ("fake:a", "fake:b"):
+        for cond, rep in (("motion", "sheet"), ("motion_shuffled", "sheet"),
+                          ("formation", "sheet"), ("motion", "text"), ("kinematics", "sheet")):
+            pipeline.run_model(str(prepared), model, condition=cond, rep=rep,
+                               complete=_coin(hash((model, cond, rep)) % 1000))
+    pipeline.run_model(str(prepared), "fake:a", condition="motion", rep="sheet",
+                       complete=_coin(7), prompt_style="informed")
+    rep = pipeline.report(str(prepared), n_boot=100)
+    prim = rep["primary_contrasts"]
+    # a: order, shape, text, prompt; b: no informed cell -> no prompt contrast
+    assert sorted(c["contrast"] for c in prim if c["model"] == "fake:a") == \
+        ["motion_over_shape", "order", "prompt", "text_vs_image"]
+    assert len([c for c in prim if c["model"] == "fake:b"]) == 3
+    assert rep["holm"]["family_size"] == 7
+    assert [c["p_holm"] for c in prim] == pytest.approx(holm([c["p"] for c in prim]))
+    assert all(c["p_holm"] >= c["p"] for c in prim)
+    sec = rep["secondary_contrasts"]
+    assert sec and not any(c["primary"] or "p_holm" in c for c in sec)
+    assert any(c["b"] == "kinematics/sheet" for c in sec)
