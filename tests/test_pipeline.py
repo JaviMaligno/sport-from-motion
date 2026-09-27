@@ -44,6 +44,19 @@ def test_run_is_resumable_and_report_has_contrasts(prepared):
     assert len(calls) == n  # nothing re-queried
     rep = pipeline.report(str(prepared), n_boot=50)
     assert any(c["b"].startswith("motion_shuffled") for c in rep["contrasts"])
+    s = next(iter(rep["runs"].values()))
+    for k in ("macro_f1", "kappa", "prior_corrected_accuracy", "per_class_recall"):
+        assert k in s and f"{k}_ci" in s
+    assert set(s["per_class_recall"]) == {"rugby_union", "soccer"}
+
+
+def test_report_cli_renders_new_columns(prepared, capsys):
+    from motion_sport import cli
+
+    pipeline.run_model(str(prepared), "dummy:first", condition="motion", rep="sheet")
+    cli.main(["report", "--items", str(prepared), "--n-boot", "20"])
+    out = capsys.readouterr().out
+    assert "pc-acc" in out and "kappa" in out and "per-class recall" in out
 
 
 def test_backend_errors_are_recorded_not_raised(prepared):

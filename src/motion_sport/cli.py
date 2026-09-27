@@ -142,6 +142,15 @@ def _fmt_ci(ci) -> str:
     return f"[{ci[0]:.2f}, {ci[1]:.2f}]"
 
 
+def _name(model: str, width: int = 34) -> str:
+    """Fit a model id in `width` keeping both ends (route and variant suffix)."""
+    return model if len(model) <= width else model[:width - 17] + ".." + model[-15:]
+
+
+def _short(sport: str) -> str:
+    return sport.replace("american_football", "am_football")[:11]
+
+
 def _report(a) -> None:
     rep = pipeline.report(a.items, a.n_boot, a.tag)
     if a.json:
@@ -149,18 +158,27 @@ def _report(a) -> None:
         return
     print(f"candidates: {rep['candidates']}  (chance = {1 / len(rep['candidates']):.2f})"
           + (f"  tag={rep['tag']}" if rep["tag"] else ""))
-    print(f"{'model':38} {'condition':16} {'repr':9} {'n':>5} {'acc':>5} {'95% CI':>14} "
-          f"{'bal':>5} {'logloss':>7}")
+    # acc = accuracy; bal = balanced accuracy; F1 = macro-F1; kappa = Cohen's kappa;
+    # pc-acc = prior-corrected accuracy (response bias removed, leave-one-match-out)
+    print(f"{'model':34} {'condition':15} {'repr':8} {'n':>4} {'acc':>5} {'95% CI':>12} "
+          f"{'bal':>5} {'F1':>5} {'kappa':>6} {'pc-acc':>6} {'95% CI':>12} {'logloss':>7}")
     for s in rep["runs"].values():
-        print(f"{s['model'][:38]:38} {s['condition']:16} {s['repr']:9} {s['n']:5d} "
-              f"{s['accuracy']:5.2f} {_fmt_ci(s['accuracy_ci']):>14} {s['balanced_accuracy']:5.2f} "
-              f"{s['log_loss']:7.3f}")
+        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} {s['n']:4d} "
+              f"{s['accuracy']:5.2f} {_fmt_ci(s['accuracy_ci']):>12} {s['balanced_accuracy']:5.2f} "
+              f"{s['macro_f1']:5.2f} {s['kappa']:6.2f} {s['prior_corrected_accuracy']:6.2f} "
+              f"{_fmt_ci(s['prior_corrected_accuracy_ci']):>12} {s['log_loss']:7.3f}")
+    cls = rep["candidates"]
+    print("\nper-class recall (95% CI in the JSON output):")
+    print(f"{'model':34} {'condition':15} {'repr':8} " + " ".join(f"{_short(c):>11}" for c in cls))
+    for s in rep["runs"].values():
+        rec = s.get("per_class_recall", {})
+        print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} "
+              + " ".join(f"{rec[c]:11.2f}" if c in rec else f"{'-':>11}" for c in cls))
     if rep["contrasts"]:
         print("\npaired contrasts (accuracy difference, match-clustered CI):")
         for c in rep["contrasts"]:
             print(f"  {c['model'][:38]:38} {c['a']} - {c['b']}: {c['diff']:+.2f} "
                   f"{_fmt_ci(c['ci'])}  (n={c['n']})")
-
 
 if __name__ == "__main__":
     main()
