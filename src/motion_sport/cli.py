@@ -84,13 +84,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--player-mode", choices=["central", "random"],
                    help="which N players to keep: the most central (preset default) or a "
                         "uniform random subset")
+    p.add_argument("--n-frames", type=int,
+                   help="override the preset's window length in frames at the clip rate "
+                        "(5 Hz: 10 = 2 s, 20 = 4 s, 40 = 8 s); clips must be at least that long")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=lambda a: print(pipeline.prepare(
         a.clips, a.out, preset=a.preset, conditions=a.conditions.split(","),
         reprs=a.reprs.split(","), per_sport=a.per_sport,
         candidates=a.candidates.split(",") if a.candidates else None,
         frames_per_view=a.frames_per_view, image_size=a.image_size, seed=a.seed,
-        n_players=a.n_players, player_mode=a.player_mode)))
+        n_players=a.n_players, player_mode=a.player_mode, n_frames=a.n_frames)))
 
     r = sub.add_parser("run", help="query a model: chat (backends/chat.py) or typed-decision "
                                    "(backends/decision.py: jev:, laya:, laya-http:)")

@@ -122,12 +122,29 @@ def clip_series(clip: Clip, condition: str, seed: int) -> np.ndarray:
     return invariant_series(np.stack(view.frames), clip.fps)
 
 
+MINIROCKET_MIN_LEN = 9  # its kernels have length 9
+
+
+def pad_series(X: np.ndarray, min_len: int = MINIROCKET_MIN_LEN) -> np.ndarray:
+    """[n, C, L] -> [n, C, max(L, min_len)], repeating each series' last value.
+
+    2 s clips at 5 Hz give 10 frames and so 8-point series, one short of MiniRocket's
+    kernel. Repeating the last value (rather than aeon's suggested zeros) adds no jump
+    that a kernel could read as motion; with 1 of 9 points padded, every clip is
+    padded alike, so it cannot be a sport cue.
+    """
+    if X.shape[2] < 2:
+        raise ValueError(f"MiniRocket needs a sequence, got {X.shape[2]} time point(s)")
+    if X.shape[2] >= min_len:
+        return X
+    return np.pad(X, ((0, 0), (0, 0), (0, min_len - X.shape[2])), mode="edge")
+
+
 def minirocket_fit_predict(X: np.ndarray, y: list[str], seed: int = 0,
                            n_kernels: int = 10_000) -> FitPredict:
     from aeon.transformations.collection.convolution_based import MiniRocket
 
-    if X.shape[2] < 9:
-        raise ValueError(f"MiniRocket needs >= 9 time points, got {X.shape[2]} (use longer clips)")
+    X = pad_series(X)
     y_arr = np.asarray(y)
 
     def fit_predict(train, test):

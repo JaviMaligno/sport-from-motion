@@ -78,3 +78,23 @@ def test_deepsets_end_to_end(prepared):
     acc, rows = _acc(pipeline.run_learner(str(prepared), "deepsets", "motion", epochs=60))
     assert len(rows) == 48 and rows[0]["repr"] == "tracks"
     assert acc > 0.7
+
+
+def test_pad_series_repeats_the_last_value_up_to_the_kernel_length():
+    X = np.arange(2 * 3 * 8, dtype=np.float32).reshape(2, 3, 8)
+    P = learners.pad_series(X)
+    assert P.shape == (2, 3, learners.MINIROCKET_MIN_LEN)
+    assert np.array_equal(P[..., :8], X) and np.array_equal(P[..., 8], X[..., 7])
+    assert learners.pad_series(P) is P  # long enough: untouched
+    with pytest.raises(ValueError):
+        learners.pad_series(X[..., :1])
+
+
+def test_minirocket_runs_on_2s_clips(tmp_path):
+    pytest.importorskip("aeon")
+    for c in make_toy_clips(12, seconds=2):  # 10 frames -> 8-point series
+        c.save(tmp_path / "clips")
+    items = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "items"), preset="strict",
+                             conditions=["motion"], reprs=["text"], n_frames=10)
+    acc, rows = _acc(pipeline.run_learner(str(items), "minirocket", "motion"))
+    assert len(rows) == 24 and acc > 0.7

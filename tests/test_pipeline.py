@@ -238,3 +238,36 @@ def test_primary_contrasts_are_holm_corrected_as_one_family(prepared):
     sec = rep["secondary_contrasts"]
     assert sec and not any(c["primary"] or "p_holm" in c for c in sec)
     assert any(c["b"] == "kinematics/sheet" for c in sec)
+
+
+@pytest.mark.parametrize("n_frames", [10, 40])
+def test_prepare_n_frames_sets_the_window_length(tmp_path, n_frames):
+    for c in make_toy_clips(4, seconds=8):  # 40 frames at 5 Hz
+        c.save(tmp_path / "clips")
+    out = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "items"), preset="strict_smooth",
+                           conditions=["motion"], reprs=["text"], n_frames=n_frames)
+    cfg = json.loads((out / "config.json").read_text())
+    assert cfg["controls"]["n_frames"] == n_frames and cfg["n_clips_kept"] == 8
+    from motion_sport.schema import load_clips
+    assert {c.n_frames for c in load_clips(out / "clips")} == {n_frames}
+
+
+def test_prepare_n_frames_longer_than_the_clips_keeps_nothing(tmp_path):
+    for c in make_toy_clips(2, seconds=4):  # 20 frames
+        c.save(tmp_path / "clips")
+    out = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "items"), preset="strict",
+                           conditions=["motion"], reprs=["text"], n_frames=40)
+    assert json.loads((out / "config.json").read_text())["n_clips_kept"] == 0
+    with pytest.raises(ValueError):
+        pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "x"), preset="strict",
+                         conditions=["motion"], reprs=["text"], n_frames=1)
+
+
+def test_cli_prepare_passes_n_frames(tmp_path):
+    from motion_sport import cli
+
+    for c in make_toy_clips(2, seconds=4):
+        c.save(tmp_path / "clips")
+    cli.main(["prepare", "--clips", str(tmp_path / "clips"), "--out", str(tmp_path / "items"),
+              "--conditions", "motion", "--reprs", "text", "--n-frames", "10"])
+    assert json.loads((tmp_path / "items" / "config.json").read_text())["controls"]["n_frames"] == 10

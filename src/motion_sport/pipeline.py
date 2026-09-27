@@ -80,8 +80,15 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
             conditions: list[str], reprs: list[str], per_sport: int | None = None,
             candidates: list[str] | None = None, frames_per_view: int = 8,
             image_size: int = 320, seed: int = 0,
-            n_players: int | None = None, player_mode: str | None = None) -> pathlib.Path:
+            n_players: int | None = None, player_mode: str | None = None,
+            n_frames: int | None = None) -> pathlib.Path:
     cfg = PRESETS[preset]
+    if n_frames is not None:
+        # clip-duration sweep: the window is n_frames at the clip rate (5 Hz x seconds);
+        # ingest the clips at least that long (--clip-seconds)
+        if n_frames < 2:
+            raise ValueError(f"n_frames must be >= 2, got {n_frames}")
+        cfg = dc_replace(cfg, n_frames=n_frames)
     if n_players and cfg.n_players:
         # N must not exceed the smallest roster in the comparison (10 in basketball)
         cfg = dc_replace(cfg, n_players=n_players)
