@@ -24,7 +24,7 @@ import numpy as np
 
 from motion_sport.conditions import build_view
 from motion_sport.controls import PRESETS, apply_controls, median_speed
-from motion_sport.prompts import build_decision, build_prompt, parse_answer
+from motion_sport.prompts import PROMPT_STYLES, build_decision, build_prompt, parse_answer
 from motion_sport.render import auto_extent, contact_sheet, render_points, save_gif
 from motion_sport.schema import Clip, load_clips
 from motion_sport.serialize import view_to_state, view_to_text
@@ -140,19 +140,25 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                 elif rep == "text":
                     text = view_to_text(view)
                 prompt_repr = {"sheet": "image", "frames": "image", "gif": "image"}.get(rep, rep)
-                prompt, order = build_prompt(view, prompt_repr, cands,
-                                             seed=stable_seed(c.clip_id, cond, rep), text_payload=text)
+                pseed = stable_seed(c.clip_id, cond, rep)
+                prompt, order = build_prompt(view, prompt_repr, cands, seed=pseed,
+                                             text_payload=text)
+                prompt_inf, _ = build_prompt(view, prompt_repr, cands, seed=pseed,
+                                             text_payload=text, style="informed")
                 item = {
                     "item_id": f"{c.clip_id}__{cond}__{rep}", "clip_id": c.clip_id,
                     "sport": c.sport, "source": c.source, "match_id": c.match_id,
                     "tags": c.tags, "condition": cond, "repr": rep,
                     "files": [str(pathlib.Path(f).relative_to(out)) for f in files],
-                    "prompt": prompt, "options": order, "frame_order": view.order,
+                    # "prompt" is the neutral style (the key older items dirs have)
+                    "prompt": prompt, "prompt_informed": prompt_inf,
+                    "options": order, "frame_order": view.order,
                 }
                 if rep == "text":  # typed-decision models (Jev, Laya) read these fields
-                    instr, criteria = build_decision(view, cands,
-                                                     seed=stable_seed(c.clip_id, cond, rep))
+                    instr, criteria = build_decision(view, cands, seed=pseed)
+                    _, criteria_inf = build_decision(view, cands, seed=pseed, style="informed")
                     item.update(decision_instructions=instr, decision_criteria=criteria,
+                                decision_criteria_informed=criteria_inf,
                                 state_text=text, state_json=view_to_state(view))
                 items.append(item)
     in_by_sport = Counter(c.sport for c in raw)
@@ -234,12 +240,17 @@ def interleave(items: list[dict]) -> list[dict]:
 def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
               limit: int | None = None, max_tokens: int = 1024, temperature: float = 0.0,
               state_format: str = "text", complete=None, decide=None,
-              workers: int = 1, replicate: int = 1) -> pathlib.Path:
+              workers: int = 1, replicate: int = 1,
+              prompt_style: str = "neutral") -> pathlib.Path:
     """Query one model on every matching item. Resumable: skips done items.
 
     `replicate` K > 1 is an independent repetition of the same cell: its own file
     (suffix `__r<K>`), so it never reuses another replicate's answers. The items are
     the same in every replicate (`interleave` fixes the order, `limit` the prefix).
+
+    `prompt_style="informed"` sends the prompt that also describes how players move
+    in each option (decision models: the informed criteria); its file gets
+    `__informed` and every record carries `prompt_style`.
 
     Chat models (backends/chat.py) get the full prompt and the images. Typed-decision
     models (backends/decision.py: Jev, Laya) get instructions + criteria + a state,
@@ -263,10 +274,18 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
     items = [i for i in load_items(root) if i["condition"] == condition and i["repr"] == rep]
     if rep == "gif":
         raise ValueError("gif items are for the human study / video models, not chat backends")
+    if prompt_style not in PROMPT_STYLES:
+        raise ValueError(f"unknown prompt style {prompt_style!r}; known: {PROMPT_STYLES}")
     items = interleave(items)
     items = items[:limit] if limit else items
+    prompt_key = "prompt" if prompt_style == "neutral" else f"prompt_{prompt_style}"
+    criteria_key = "decision_criteria" + ("" if prompt_style == "neutral" else f"_{prompt_style}")
+    need = criteria_key if is_decision else prompt_key
+    if any(need not in it for it in items):
+        raise ValueError(f"{root} has no {need!r} in its items (prepared before the "
+                         f"{prompt_style} prompt existed): re-run `motion-sport prepare`")
     name = model_id + ("" if not is_decision or state_format == "text" else "+json")
-    path = _pred_path(root, name, condition, rep, replicate=replicate)
+    path = _pred_path(root, name, condition, rep, prompt_style=prompt_style, replicate=replicate)
     path.parent.mkdir(parents=True, exist_ok=True)
     done = {}
     if path.exists():
@@ -281,12 +300,12 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
             if is_decision:
                 state = it["state_text"] if state_format == "text" else it["state_json"]
                 parsed = decide(model_id, dec.Decision(state, it["decision_instructions"],
-                                                       it["decision_criteria"]))
+                                                       it[criteria_key]))
                 raw = parsed.pop("raw", "")
             else:
                 images = [(root / f).read_bytes() for f in it["files"]]
                 from motion_sport.backends.chat import last_usage
-                raw = complete(model_id, Request(it["prompt"], images, max_tokens, temperature))
+                raw = complete(model_id, Request(it[prompt_key], images, max_tokens, temperature))
                 parsed = parse_answer(raw, cands)
                 parsed["usage"] = last_usage()
         except Exception as e:  # noqa: BLE001 — record and move on; resumable
@@ -294,7 +313,8 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
                                "error": f"{type(e).__name__}: {e}"[:300]}
         rec = {"item_id": it["item_id"], "clip_id": it["clip_id"], "sport": it["sport"],
                "match_id": it["match_id"], "tags": it["tags"], "model": name,
-               "condition": condition, "repr": rep, "replicate": replicate,
+               "condition": condition, "repr": rep, "prompt_style": prompt_style,
+               "replicate": replicate,
                "raw": raw[:2000], **parsed}
         with lock:
             fh.write(json.dumps(rec) + "\n")

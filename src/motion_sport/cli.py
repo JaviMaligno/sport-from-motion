@@ -102,10 +102,13 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--replicate", type=int, default=1,
                    help="replicate index K: K > 1 is an independent re-run of the same cell "
                         "(own file, suffix __rK; never reuses another replicate's answers)")
+    r.add_argument("--prompt-style", default="neutral", choices=list(pipeline.PROMPT_STYLES),
+                   help="informed = also describe how players move in each option "
+                        "(file suffix __informed)")
     r.set_defaults(func=lambda a: print(pipeline.run_model(
         a.items, a.model, condition=a.condition, rep=a.repr, limit=a.limit,
         max_tokens=a.max_tokens, temperature=a.temperature, state_format=a.state_format,
-        workers=a.workers, replicate=a.replicate)))
+        workers=a.workers, replicate=a.replicate, prompt_style=a.prompt_style)))
 
     b = sub.add_parser("baseline", help="nuisance / tempo / kinematic feature classifiers")
     b.add_argument("--items", required=True)

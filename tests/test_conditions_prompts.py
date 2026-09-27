@@ -61,3 +61,35 @@ def test_parse_answer_variants():
     p = parse_answer('Sure: {"probabilities": {"soccer": 3, "rugby union": 1}}', CANDS)
     assert p["label"] == "soccer" and p["probs"]["soccer"] == 0.75
     assert parse_answer("I think rugby", CANDS)["label"] is None
+
+
+def test_informed_prompt_is_symmetric_and_keeps_the_option_order():
+    import re
+
+    from motion_sport.prompts import MOVEMENT
+    from motion_sport.schema import SPORTS
+
+    assert set(MOVEMENT) == set(SPORTS)  # every registered sport has a description
+    lens = [len(d) for d in MOVEMENT.values()]
+    assert max(lens) <= 1.25 * min(lens)  # similar length: no sport gets more help
+    assert not any(re.search(r"\d", d) for d in MOVEMENT.values())  # no numbers
+    v = build_view(make_toy_clips(1)[0], "motion", np.random.default_rng(0))
+    neutral, order = build_prompt(v, "image", CANDS, seed=4)
+    informed, order_i = build_prompt(v, "image", CANDS, seed=4, style="informed")
+    assert order_i == order
+    assert "How players typically move" in informed and "How players" not in neutral
+    guide = informed.split("How players typically move", 1)[1]
+    pos = [guide.index(f"- {SPORTS[c]}:") for c in order]
+    assert pos == sorted(pos)  # descriptions listed in the shown (shuffled) order
+    assert informed.startswith(neutral.split("\n\n")[0])  # same preamble + view description
+    assert informed.endswith(neutral.rsplit("\n\n", 1)[1])  # same question
+
+
+def test_informed_decision_criteria():
+    from motion_sport.prompts import build_decision
+
+    v = build_view(make_toy_clips(1)[0], "motion", np.random.default_rng(0))
+    _, neutral = build_decision(v, CANDS, seed=1)
+    _, informed = build_decision(v, CANDS, seed=1, style="informed")
+    assert list(neutral) == list(informed)
+    assert all(informed[c].startswith(neutral[c] + ": ") for c in CANDS)

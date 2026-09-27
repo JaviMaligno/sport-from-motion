@@ -9,6 +9,11 @@ Design choices that matter for the measurement:
   "cannot read motion" when it is really "was told nothing".
 - The answer is a probability per option, not just a label, so we get log-loss
   and calibration, and can tell a confident mistake from a coin flip.
+- Two prompt styles. "neutral" names the sports and nothing else. "informed" adds a
+  short description of how players typically move in each option, answering the
+  objection "you never told it what to look for". The descriptions are symmetric
+  (similar length and structure: rhythm, collective shape, a distinctive pattern),
+  general knowledge only, and carry no numbers or facts about our data.
 """
 from __future__ import annotations
 
@@ -55,6 +60,57 @@ _WHAT = {
                               "shows each individual's movement, ending at the dot.",
 }
 
+PROMPT_STYLES = ("neutral", "informed")
+
+# How players move in each registered sport. Every entry: rhythm, collective shape,
+# one distinctive pattern; no numbers, no player counts (the controls fix those), no
+# field sizes (removed by the controls), nothing taken from our datasets.
+MOVEMENT: dict[str, str] = {
+    "soccer": "Continuous, flowing play: long spells of jogging and walking broken by "
+              "occasional sprints. The team keeps a wide, loosely structured shape that "
+              "shifts across the field as a block, its lines stretching and compressing "
+              "as possession changes.",
+    "basketball": "Continuous play in a tight space with constant stop-start movement: "
+                  "short bursts, sharp cuts and quick changes of direction. Players gather "
+                  "around one end at a time, circling and screening each other, then all "
+                  "run to the other end together.",
+    "handball": "Continuous play with fast transitions: players sprint together from one "
+                "end to the other, then settle into a set arrangement in which attackers "
+                "move side to side along an arc facing a compact defensive line that "
+                "shuffles laterally.",
+    "american_football": "Play comes in short, separate bursts. Players stand almost still "
+                         "in two facing lines, then all start moving at the same instant; "
+                         "some run long straight or angled routes while others collide near "
+                         "the starting line, and the action stops abruptly.",
+    "rugby_union": "Mostly continuous play in which players repeatedly converge into tight, "
+                   "nearly static clusters, then spread out into staggered, flat lines that "
+                   "advance or retreat across the field together, with frequent short "
+                   "sprints into contact.",
+    "rugby_sevens": "Continuous, very open play with players spread thinly across a large "
+                    "space. Long sprints and wide sweeping runs dominate; brief tight "
+                    "clusters form around tackles and quickly break up into fast, stretched "
+                    "attacking lines.",
+    "rugby_league": "Continuous play in repeated short sets: after each tackle the players "
+                    "quickly reset into two roughly flat, opposing lines with a gap between "
+                    "them, which then advance and retreat together as attackers run straight "
+                    "at the defence.",
+    "field_hockey": "Continuous play across a large space with frequent short accelerations "
+                    "and quick changes of direction. The team keeps a spread-out, structured "
+                    "shape that slides as a block, with small groups forming moving "
+                    "triangles around the play.",
+    "ice_hockey": "Continuous, very fast play in an enclosed space. Movement is smooth and "
+                  "gliding, with wide curved paths, long coasting phases and loops behind "
+                  "the play; groups rush together towards one end and then sweep back the "
+                  "other way.",
+    "futsal": "Continuous play in a small space with constant rotation: players swap "
+              "positions in fluid patterns, with short sprints and quick changes of "
+              "direction. The team keeps a compact diamond or square shape that moves "
+              "together as possession changes.",
+}
+
+_GUIDE = ("How players typically move in each option (general descriptions of each sport, "
+          "not of this clip):\n{lines}")
+
 _ASK = (
     "Which sport is this? Choose among exactly these options: {options}.\n"
     "Reply with JSON only, no prose around it:\n"
@@ -87,24 +143,45 @@ def describe_view(view: View, repr_kind: str, where: str = "given below") -> str
     return f"{_PREAMBLE}\n\n{what}"
 
 
+def movement_guide(order: list[str]) -> str:
+    """The informed prompt's extra paragraph, one line per option in the shown order."""
+    missing = [c for c in order if c not in MOVEMENT]
+    if missing:
+        raise ValueError(f"no movement description for {missing}: add it to prompts.MOVEMENT")
+    return _GUIDE.format(lines="\n".join(f"- {SPORTS[c]}: {MOVEMENT[c]}" for c in order))
+
+
+def _check_style(style: str) -> None:
+    if style not in PROMPT_STYLES:
+        raise ValueError(f"unknown prompt style {style!r}; known: {PROMPT_STYLES}")
+
+
 def build_prompt(view: View, repr_kind: str, candidates: list[str], *, seed: int,
-                 text_payload: str | None = None) -> tuple[str, list[str]]:
-    """Chat prompt. Return (prompt, shown_order). `repr_kind` in {"image", "trails", "text"}."""
+                 text_payload: str | None = None, style: str = "neutral") -> tuple[str, list[str]]:
+    """Chat prompt. Return (prompt, shown_order). `repr_kind` in {"image", "trails",
+    "text", "video"}. Both styles show the options in the same seeded order."""
+    _check_style(style)
     order = candidate_order(candidates, seed)
     parts = [describe_view(view, repr_kind)]
+    if style == "informed":
+        parts.append(movement_guide(order))
     if text_payload:
         parts.append(text_payload)
     parts.append(_ASK.format(options=", ".join(f'"{SPORTS[c]}"' for c in order)))
     return "\n\n".join(parts), order
 
 
-def build_decision(view: View, candidates: list[str], *, seed: int) -> tuple[str, dict[str, str]]:
+def build_decision(view: View, candidates: list[str], *, seed: int,
+                   style: str = "neutral") -> tuple[str, dict[str, str]]:
     """Instructions + criteria for typed-decision models (Jev, Laya); the coordinates
-    go in the separate `state` field. Criteria descriptions are just the sport names
-    (neutral: no hints about how each sport moves)."""
+    go in the separate `state` field. Neutral criteria are just the sport names; the
+    informed ones add the same movement descriptions as the chat prompt."""
+    _check_style(style)
     order = candidate_order(candidates, seed)
     instructions = describe_view(view, "text", where="given in the input") + \
         "\n\nWhich team sport is this?"
+    if style == "informed":
+        return instructions, {c: f"{SPORTS[c]}: {MOVEMENT[c]}" for c in order}
     return instructions, {c: SPORTS[c] for c in order}
 
 

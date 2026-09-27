@@ -140,3 +140,51 @@ def test_report_ignores_stale_clips_and_missing_cells(prepared):
     assert rep["ignored"]["rows_not_in_items"] == 1
     assert not any(r["model"] == "old:m" for r in rep["runs"].values())
     assert not any(c["model"] == "fake:solo" for c in rep["contrasts"])
+
+
+def test_informed_prompt_style_runs_to_its_own_file(prepared):
+    seen = []
+
+    def fake(model_id, req):
+        seen.append(req.prompt)
+        return chat.complete("dummy:first", req)
+
+    items = pipeline.load_items(prepared)
+    assert all(it["prompt_informed"] != it["prompt"] for it in items)
+    pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", complete=fake)
+    p = pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet",
+                           complete=fake, prompt_style="informed")
+    assert p.name == "fake__m__motion__sheet__informed.jsonl"
+    assert all("How players typically move" in q for q in seen[24:])
+    assert all("How players typically move" not in q for q in seen[:24])
+    assert all(json.loads(line)["prompt_style"] == "informed" for line in p.read_text().splitlines())
+    rep = pipeline.report(str(prepared), n_boot=20)
+    assert any(c["a"] == "motion/sheet[informed]" and c["b"] == "motion/sheet"
+               for c in rep["contrasts"])
+    styles = {r["prompt_style"] for r in rep["runs"].values()}
+    assert styles == {"neutral", "informed"}
+
+
+def test_old_items_fail_clearly_only_for_informed(prepared):
+    path = prepared / "items.jsonl"
+    old = [{k: v for k, v in json.loads(line).items()
+            if k not in ("prompt_informed", "decision_criteria_informed")}
+           for line in path.read_text().splitlines()]
+    path.write_text("".join(json.dumps(i) + "\n" for i in old))
+    pipeline.run_model(str(prepared), "dummy:first", condition="formation", rep="sheet", limit=2)
+    with pytest.raises(ValueError, match="re-run `motion-sport prepare`"):
+        pipeline.run_model(str(prepared), "dummy:first", condition="formation", rep="sheet",
+                           prompt_style="informed")
+
+
+def test_informed_criteria_reach_decision_models(prepared):
+    got = []
+
+    def decide(model_id, d):
+        got.append(d.criteria)
+        c = next(iter(d.criteria))
+        return {"label": c, "probs": {c: 1.0}, "error": None, "raw": ""}
+
+    pipeline.run_model(str(prepared), "jev:x", condition="motion", rep="text", decide=decide,
+                       prompt_style="informed", limit=2)
+    assert len(got) == 2 and all(":" in v for crit in got for v in crit.values())
