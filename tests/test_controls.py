@@ -71,3 +71,24 @@ def test_auto_tempo_must_be_resolved():
     with pytest.raises(ValueError):
         apply_controls(make_toy_clips(1, seconds=10)[0], PRESETS["strict_tempo"],
                        np.random.default_rng(0))
+
+
+def test_strict_smooth_reduces_jitter_and_keeps_shape():
+    import numpy as np
+    from motion_sport.controls import PRESETS, apply_controls
+    from motion_sport.schema import Clip
+
+    rng = np.random.default_rng(0)
+    t = np.arange(40)[:, None, None] / 5.0
+    base = np.concatenate([np.cos(t + np.arange(12)[None, :, None]),
+                           np.sin(t + np.arange(12)[None, :, None])], axis=2) * 10
+    noisy = (base + rng.normal(0, 0.8, base.shape)).astype(np.float32)
+    clip = Clip(clip_id="c", sport="soccer", source="toy", match_id="m", fps=5.0, xy=noisy)
+
+    def jerk(c):
+        return float(np.abs(np.diff(c.xy, n=2, axis=0)).mean())
+
+    a = apply_controls(clip, PRESETS["strict"], np.random.default_rng(1))
+    b = apply_controls(clip, PRESETS["strict_smooth"], np.random.default_rng(1))
+    assert a is not None and b is not None and a.xy.shape == b.xy.shape
+    assert jerk(b) < 0.5 * jerk(a)

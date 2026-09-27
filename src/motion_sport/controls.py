@@ -175,6 +175,11 @@ class ControlConfig:
     tempo: float | str | None = None
     n_frames: int | None = 20
     drop_team: bool = True
+    # Gaussian sigma in frames (at the clip rate), applied alike to every source.
+    # Trackers differ in high-frequency jitter (TeamTrack's fisheye soccer: mean
+    # |acc| 7 m/s^2 vs ~1 in Metrica/SkillCorner), and a trained learner reads that
+    # jitter as "stop-start" = basketball. Smoothing equalises it.
+    smooth: float = 0.0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -186,6 +191,9 @@ PRESETS: dict[str, ControlConfig] = {
     "raw": ControlConfig(n_players=None, space="none", rotate=False, tempo=None, drop_team=False),
     # the main condition: count, scale, orientation and team removed; speed kept
     "strict": ControlConfig(),
+    # strict + equalised tracker jitter; needed whenever sources differ within a sport
+    # (cross-source test: MiniRocket 0.17 -> 0.89 on unseen TeamTrack soccer/basketball)
+    "strict_smooth": ControlConfig(smooth=2.0),
     # additionally equalise tempo: only the *shape* of motion is left
     "strict_tempo": ControlConfig(tempo="auto"),
     # keeps relative spread (field-normalised), for the multi-size comparison
@@ -211,6 +219,10 @@ def apply_controls(clip: Clip, cfg: ControlConfig, rng: np.random.Generator) -> 
             return None
     elif cfg.tempo:
         raise ValueError("tempo normalisation needs n_frames")
+    if cfg.smooth:
+        from scipy.ndimage import gaussian_filter1d
+        c = _log(c.replace(xy=gaussian_filter1d(c.xy, cfg.smooth, axis=0, mode="nearest")),
+                 "smooth", sigma_frames=cfg.smooth)
     c = normalize_space(c, cfg.space)
     if cfg.rotate:
         c = random_rigid(c, rng)
