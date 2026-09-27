@@ -35,6 +35,7 @@ cd experiments/sport-from-motion
 uv venv && uv pip install -e ".[dev]"      # núcleo: numpy, pillow, scikit-learn
 uv pip install -e ".[series]"              # opcional: aeon (MiniRocket)
 uv pip install -e ".[probe]"               # opcional: torch + transformers (V-JEPA 2, DeepSets)
+uv pip install -e ".[video]"               # opcional: imageio-ffmpeg (--reprs video)
 uv run pytest
 ```
 
@@ -57,6 +58,8 @@ motion-sport ingest --source long-csv --input data/raw/teamtrack_handball.csv --
 # 2. Controles + renders + prompts
 motion-sport prepare --clips data/clips --out runs/pilot-strict --preset strict --per-sport 200
 motion-sport prepare --clips data/clips --out runs/pilot-raw --preset raw --conditions motion --reprs sheet
+# vídeo mp4 para Gemini (necesita .[video]) y N jugadores al azar en vez de los centrales
+motion-sport prepare --clips data/clips --out runs/pilot-video --reprs sheet,video --player-mode random
 
 # 3. Comprobar que los controles funcionan (nuisance debe salir al azar en strict)
 motion-sport baseline --items runs/pilot-strict --features nuisance
@@ -74,8 +77,16 @@ motion-sport run --items runs/pilot-strict --model azure-anthropic:claude-opus-5
     --condition motion --repr sheet --limit 50
 motion-sport run --items runs/pilot-strict --model azure-openai:gpt-5.6-sol --condition motion_shuffled --repr sheet
 motion-sport probe --items runs/pilot-strict --encoder facebook/vjepa2-vitl-fpc64-256
+# réplicas (fichero propio __rK), prompt informado (__informed) y vídeo (solo vertex:/Gemini)
+motion-sport run --items runs/pilot-strict --model vertex:gemini-2.5-pro --condition motion \
+    --repr sheet --limit 100 --replicate 2
+motion-sport run --items runs/pilot-strict --model azure-openai:gpt-5.6-sol --condition motion \
+    --repr sheet --prompt-style informed
+motion-sport run --items runs/pilot-strict --model vertex:gemini-2.5-pro --condition motion --repr video
 
-# 6. Informe con IC agrupados por partido y contrastes emparejados
+# 6. Informe con IC agrupados por partido: exactitud, balanceada, macro-F1, kappa,
+#    exactitud corregida por prior, recall por clase, réplicas, contrastes primarios
+#    (Holm) y secundarios (exploratorios). Ignora predicciones de clips que ya no están.
 motion-sport report --items runs/pilot-strict
 motion-sport report --items runs/pilot-strict --tag pre_snap     # subcaso formación
 ```
@@ -126,15 +137,15 @@ src/motion_sport/
   loaders/         metrica, sportvu, nfl, long_csv (genérico), synthetic (solo pruebas)
   controls.py      controles de fugas y presets (raw / strict / strict_tempo / field_scaled)
   conditions.py    formation / motion / motion_shuffled / kinematics / kinematics_solo
-  render.py        point-light: puntos grises, lienzo cuadrado, hojas de contacto, estelas, GIF
+  render.py        point-light: puntos grises, lienzo cuadrado, hojas de contacto, estelas, GIF, mp4
   serialize.py     la misma vista como texto
-  prompts.py       prompt de opciones cerradas (barajadas por ítem) y parseo de la respuesta
+  prompts.py       prompt de opciones cerradas (barajadas por ítem), neutro o informado, y parseo
   backends/chat.py VLM por Azure y APIs directas (solo stdlib)
   backends/decision.py  Jev / Laya (protocolo /v1/systemone o Laya en proceso)
   backends/probe.py  encoder de vídeo congelado (V-JEPA 2 / VideoMAE) + probe logístico
   baselines.py     clasificadores de atajos (nuisance, tempo) y cinemático
   learners.py      CV agrupada por partido; MiniRocket (series invariantes) y DeepSets
-  evaluate.py      métricas, bootstrap agrupado por partido, contrastes emparejados
+  evaluate.py      métricas, bootstrap agrupado por partido, contrastes emparejados, Holm, réplicas
   pipeline.py      prepare / run_model / run_baseline / run_probe / report
   cli.py           `motion-sport ...`
 ```

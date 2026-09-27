@@ -199,6 +199,18 @@ Todos sobre **exactamente los mismos ítems**.
 
 - Exactitud, exactitud balanceada, log-loss (el modelo da una probabilidad por
   opción) y matriz de confusión.
+- Métricas que un favorito no infla: recall por clase, macro-F1, kappa de Cohen y
+  **exactitud corregida por prior** (calibración contextual: la probabilidad de cada
+  ítem se divide por la distribución media que el modelo predice en los *otros*
+  partidos, se renormaliza y se toma el máximo). También `predicted_share`: cuántas
+  veces sale cada respuesta.
+- **Contrastes primarios pre-registrados** (`pipeline.PRIMARY_CONTRASTS`): orden
+  (`motion − motion_shuffled`), movimiento sobre forma (`motion − formation`), texto
+  frente a imagen y prompt informado frente a neutro, en `sheet`. Holm sobre todos los
+  primarios de todos los modelos del informe; el resto de contrastes es exploratorio y
+  se da con p sin corregir. El p es bilateral y sale del mismo bootstrap agrupado que el IC.
+- Réplicas (`run --replicate K`): media y DE entre réplicas, acuerdo por ítem, y
+  contrastes sobre la corrección media por ítem.
 - **IC por bootstrap agrupado por partido** desde el primer día (la lección de los
   14 ítems de la Parte 1).
 - Validación cruzada del probe y de los baselines con `GroupKFold` por partido.
