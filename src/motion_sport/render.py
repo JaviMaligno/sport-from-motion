@@ -6,7 +6,10 @@ point-light display applied to a whole team.
 """
 from __future__ import annotations
 
+import os
 import pathlib
+import shutil
+import subprocess
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -59,6 +62,38 @@ def save_gif(frames: list[Image.Image], path: str | pathlib.Path, fps: float) ->
     path = pathlib.Path(path)
     frames[0].save(path, save_all=True, append_images=frames[1:],
                    duration=int(1000 / fps), loop=0)
+    return path
+
+
+def ffmpeg_exe() -> str:
+    """FFMPEG_BIN, else imageio-ffmpeg's bundled binary, else an ffmpeg on PATH."""
+    if os.environ.get("FFMPEG_BIN"):
+        return os.environ["FFMPEG_BIN"]
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001 — not installed, or no binary for this platform
+        pass
+    for exe in (shutil.which("ffmpeg"), "/usr/local/bin/ffmpeg"):
+        if exe and pathlib.Path(exe).exists():
+            return exe
+    raise RuntimeError("no ffmpeg found: pip install imageio-ffmpeg (or .[video]) or set FFMPEG_BIN")
+
+
+def save_mp4(frames: list[Image.Image], path: str | pathlib.Path, fps: float) -> pathlib.Path:
+    """H.264 mp4 of the frames at `fps`, one video frame per frame (for video models)."""
+    path = pathlib.Path(path)
+    w, h = frames[0].size
+    raw = b"".join(np.asarray(f.convert("RGB"), dtype=np.uint8).tobytes() for f in frames)
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+           "-s", f"{w}x{h}", "-r", f"{fps:g}", "-i", "-",
+           # yuv420p needs even sides; pad with the background colour if they are odd
+           "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=white",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-r", f"{fps:g}",
+           "-movflags", "+faststart", "-an", str(path)]
+    res = subprocess.run(cmd, input=raw, capture_output=True, timeout=120)
+    if res.returncode:
+        raise RuntimeError(f"ffmpeg failed: {res.stderr.decode(errors='replace')[:500]}")
     return path
 
 

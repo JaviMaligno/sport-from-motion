@@ -72,7 +72,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", required=True)
     p.add_argument("--preset", default="strict", choices=sorted(pipeline.PRESETS))
     p.add_argument("--conditions", default="formation,motion,motion_shuffled,kinematics,kinematics_solo")
-    p.add_argument("--reprs", default="sheet,trails,text")
+    p.add_argument("--reprs", default="sheet,trails,text",
+                   help="any of sheet,frames,trails,text,gif,video (video: H.264 mp4 for "
+                        "Gemini, needs ffmpeg: pip install -e '.[video]')")
     p.add_argument("--per-sport", type=int)
     p.add_argument("--candidates", help="extra distractor sports offered to the model")
     p.add_argument("--frames-per-view", type=int, default=8)

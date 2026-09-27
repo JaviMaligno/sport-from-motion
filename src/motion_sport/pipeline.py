@@ -5,7 +5,7 @@ On-disk layout of one prepared set (everything a run needs, nothing else):
     <items_dir>/
       config.json            preset, seed, candidates, conditions, reprs
       clips/*.npz            controlled clips (what the baselines/probe read)
-      render/<clip>/...      PNG / GIF files
+      render/<clip>/...      PNG / GIF / MP4 files
       items.jsonl            one line per (clip, condition, representation)
       predictions/*.jsonl    one file per (model, condition, representation)
 """
@@ -25,17 +25,17 @@ import numpy as np
 from motion_sport.conditions import build_view
 from motion_sport.controls import PRESETS, apply_controls, median_speed
 from motion_sport.prompts import PROMPT_STYLES, build_decision, build_prompt, parse_answer
-from motion_sport.render import auto_extent, contact_sheet, render_points, save_gif
+from motion_sport.render import auto_extent, contact_sheet, render_points, save_gif, save_mp4
 from motion_sport.schema import Clip, load_clips
 from motion_sport.serialize import view_to_state, view_to_text
 
 # which representations make sense for which condition
 VALID = {
     "formation": {"sheet", "text"},
-    "motion": {"sheet", "frames", "trails", "text", "gif"},
-    "motion_shuffled": {"sheet", "frames", "text"},
-    "kinematics": {"sheet", "trails", "text", "gif"},
-    "kinematics_solo": {"sheet", "trails", "text", "gif"},
+    "motion": {"sheet", "frames", "trails", "text", "gif", "video"},
+    "motion_shuffled": {"sheet", "frames", "text", "video"},
+    "kinematics": {"sheet", "trails", "text", "gif", "video"},
+    "kinematics_solo": {"sheet", "trails", "text", "gif", "video"},
 }
 STATIC_SPEED_MS = 1.0  # median player speed (m/s) under which a clip is tagged "static"
 
@@ -105,6 +105,7 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
         kept += 1
         kept_by_sport[c.sport] += 1
         for cond in conditions:
+            state = rng.bit_generator.state  # replayed below for the full-rate video view
             view = build_view(c, cond, rng, k=frames_per_view)
             ext = _extent(np.stack(view.frames), cfg.space)
             for rep in reprs:
@@ -114,7 +115,17 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                 rdir.mkdir(parents=True, exist_ok=True)
                 files: list[str] = []
                 text = None
-                if rep in ("sheet", "frames", "gif"):
+                shown = view
+                if rep == "video":
+                    # every frame of the clip at its own rate (5 fps), same random draws
+                    # as the sheet (same kinematics layout); shuffled for motion_shuffled
+                    vrng = np.random.default_rng()
+                    vrng.bit_generator.state = state
+                    shown = build_view(c, cond, vrng, k=c.n_frames)
+                    vext = _extent(np.stack(shown.frames), cfg.space)
+                    files = [save_mp4([render_points(f, extent=vext, size=image_size)
+                                       for f in shown.frames], rdir / f"{cond}.mp4", c.fps)]
+                elif rep in ("sheet", "frames", "gif"):
                     imgs = [render_points(f, extent=ext, size=image_size) for f in view.frames]
                     if rep == "sheet":
                         img = imgs[0] if len(imgs) == 1 else contact_sheet(imgs, cols=4)
@@ -141,9 +152,9 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                     text = view_to_text(view)
                 prompt_repr = {"sheet": "image", "frames": "image", "gif": "image"}.get(rep, rep)
                 pseed = stable_seed(c.clip_id, cond, rep)
-                prompt, order = build_prompt(view, prompt_repr, cands, seed=pseed,
+                prompt, order = build_prompt(shown, prompt_repr, cands, seed=pseed,
                                              text_payload=text)
-                prompt_inf, _ = build_prompt(view, prompt_repr, cands, seed=pseed,
+                prompt_inf, _ = build_prompt(shown, prompt_repr, cands, seed=pseed,
                                              text_payload=text, style="informed")
                 item = {
                     "item_id": f"{c.clip_id}__{cond}__{rep}", "clip_id": c.clip_id,
@@ -152,8 +163,10 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                     "files": [str(pathlib.Path(f).relative_to(out)) for f in files],
                     # "prompt" is the neutral style (the key older items dirs have)
                     "prompt": prompt, "prompt_informed": prompt_inf,
-                    "options": order, "frame_order": view.order,
+                    "options": order, "frame_order": shown.order,
                 }
+                if rep == "video":
+                    item["video_fps"] = c.fps
                 if rep == "text":  # typed-decision models (Jev, Laya) read these fields
                     instr, criteria = build_decision(view, cands, seed=pseed)
                     _, criteria_inf = build_decision(view, cands, seed=pseed, style="informed")
@@ -303,9 +316,11 @@ def run_model(items_dir: str, model_id: str, *, condition: str, rep: str,
                                                        it[criteria_key]))
                 raw = parsed.pop("raw", "")
             else:
-                images = [(root / f).read_bytes() for f in it["files"]]
+                media = [(root / f).read_bytes() for f in it["files"]]
+                videos, images = (media, []) if rep == "video" else ([], media)
                 from motion_sport.backends.chat import last_usage
-                raw = complete(model_id, Request(it[prompt_key], images, max_tokens, temperature))
+                raw = complete(model_id, Request(it[prompt_key], images, max_tokens, temperature,
+                                                 videos=videos, video_fps=it.get("video_fps")))
                 parsed = parse_answer(raw, cands)
                 parsed["usage"] = last_usage()
         except Exception as e:  # noqa: BLE001 — record and move on; resumable

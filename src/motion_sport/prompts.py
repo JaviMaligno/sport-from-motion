@@ -55,6 +55,22 @@ _WHAT = {
                                    "spot on a neutral grid AND rotated by its own random angle, so "
                                    "team shape and shared direction are destroyed; the fading line "
                                    "shows each individual's movement, ending at the dot.",
+    ("motion", "video"): "You are shown a short silent video of the play: {k} frames over "
+                         "{span:.1f} s ({fps:.0f} frames per second), in chronological order.",
+    ("motion_shuffled", "video"): "You are shown a short silent video made of {k} snapshots of "
+                                  "the same play, taken over {span:.1f} s but played in a "
+                                  "shuffled, unknown order ({fps:.0f} frames per second).",
+    ("kinematics", "video"): "You are shown a short silent video ({k} frames over {span:.1f} s, "
+                             "{fps:.0f} frames per second, in chronological order). Each "
+                             "player's path has been moved to its own spot on a neutral grid, "
+                             "so the team shape is destroyed and only each individual's "
+                             "movement remains.",
+    ("kinematics_solo", "video"): "You are shown a short silent video ({k} frames over "
+                                  "{span:.1f} s, {fps:.0f} frames per second, in chronological "
+                                  "order). Each player's path has been moved to its own spot on "
+                                  "a neutral grid AND rotated by its own random angle, so both "
+                                  "the team shape and any shared running direction are "
+                                  "destroyed; only each individual's movement rhythm remains.",
     ("kinematics", "trails"): "Each player's path over {span:.1f} s has been moved to its own spot "
                               "on a neutral grid, so the team shape is destroyed; the fading line "
                               "shows each individual's movement, ending at the dot.",
@@ -134,7 +150,7 @@ def describe_view(view: View, repr_kind: str, where: str = "given below") -> str
     what = _WHAT.get((view.condition, key_repr))
     if what is None:
         raise ValueError(f"no prompt for condition={view.condition} repr={repr_kind}")
-    what = what.format(k=k, dt=dt, span=span)
+    what = what.format(k=k, dt=dt, span=span, fps=(k - 1) / span if span else 0.0)
     if repr_kind == "text":
         what = what.replace("snapshots", f"snapshots ({where} as coordinates)")
         what = what.replace("panel 1", "snapshot 1")

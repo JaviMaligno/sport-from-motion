@@ -24,7 +24,8 @@ tagged as set pieces / static phases (e.g. NFL pre-snap) vs. open play.
 
 Representations: "sheet" (all frames tiled in one image — works with every API),
 "frames" (one image per frame), "trails" (one image, fading trails), "text"
-(coordinates as text), "gif" (for humans and video-capable models).
+(coordinates as text), "gif" (for humans), "video" (H.264 mp4 of every frame at the
+clip rate, for video-capable models: Gemini).
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ import numpy as np
 from motion_sport.schema import Clip
 
 CONDITIONS = ("formation", "motion", "motion_shuffled", "kinematics", "kinematics_solo")
-REPRESENTATIONS = ("sheet", "frames", "trails", "text", "gif")
+REPRESENTATIONS = ("sheet", "frames", "trails", "text", "gif", "video")
 
 
 @dataclass

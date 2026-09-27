@@ -19,6 +19,7 @@ Model ids are "<route>:<deployment>", mirroring experiments/judge-bias/providers
                                 -> {endpoint}/models/chat/completions
                                 Without a key, an Entra ID token from `az login` is used.
   vertex:<model>                Gemini on Vertex AI (generateContent), token from `gcloud`.
+                                The only route that takes video (Request.videos, mp4).
                                 env VERTEX_PROJECT (+ VERTEX_LOCATION, default "global")
   vertex-anthropic:<model>      Claude on Vertex AI (rawPredict, Messages body), same env.
   openai:<model>, anthropic:<model>   direct vendor APIs (OPENAI_API_KEY, ANTHROPIC_API_KEY)
@@ -66,6 +67,8 @@ class Request:
     images: list[bytes] = field(default_factory=list)  # PNG bytes, in display order
     max_tokens: int = 1024
     temperature: float = 0.0
+    videos: list[bytes] = field(default_factory=list)  # mp4 bytes; only VIDEO_ROUTES take them
+    video_fps: float | None = None  # frame rate the model should sample the videos at
 
 
 def _post(url: str, headers: dict, payload: dict) -> dict:
@@ -275,8 +278,13 @@ def _vertex_anthropic(model: str, req: Request) -> str:
 
 def _vertex(model: str, req: Request) -> str:
     url = f"{_vertex_base('google', model)}:generateContent"
-    parts: list[dict] = [{"inlineData": {"mimeType": "image/png", "data": _b64(png)}}
-                         for png in req.images]
+    parts: list[dict] = []
+    for mp4 in req.videos:
+        part: dict = {"inlineData": {"mimeType": "video/mp4", "data": _b64(mp4)}}
+        if req.video_fps:  # Gemini samples 1 fps by default: fewer frames than the clip has
+            part["videoMetadata"] = {"fps": req.video_fps}
+        parts.append(part)
+    parts += [{"inlineData": {"mimeType": "image/png", "data": _b64(png)}} for png in req.images]
     parts.append({"text": req.prompt})
     payload = {"contents": [{"role": "user", "parts": parts}],
                "generationConfig": {"temperature": req.temperature,
@@ -305,6 +313,9 @@ def _dummy(mode: str, req: Request) -> str:
     return json.dumps({"probabilities": probs, "answer": opts[0], "rationale": f"dummy:{mode}"})
 
 
+# routes that accept video input; every other route refuses a request with videos
+VIDEO_ROUTES = {"vertex", "dummy"}
+
 ROUTES = {
     "azure-openai": _azure_openai,
     "azure-anthropic": _azure_anthropic,
@@ -323,4 +334,7 @@ def complete(model_id: str, req: Request) -> str:
     route, model = model_id.split(":", 1)
     if route not in ROUTES:
         raise BackendError(f"unknown route {route!r}; known: {sorted(ROUTES)}")
+    if req.videos and route not in VIDEO_ROUTES:
+        raise BackendError(f"route {route!r} does not accept video; video routes: "
+                           f"{sorted(VIDEO_ROUTES)}")
     return ROUTES[route](model, req)
