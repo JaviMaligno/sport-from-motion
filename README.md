@@ -6,6 +6,7 @@ hermano de [*Where's the ball?*](https://github.com/JaviMaligno/wheres-the-ball)
 
 - Diseño completo, controles de fugas y condiciones: [`docs/design.md`](docs/design.md)
 - Qué datasets usar y qué hay que construir (rugby): [`docs/datasets.md`](docs/datasets.md)
+- Pre-registro de la corrida final de modelos: [`docs/preregistration.md`](docs/preregistration.md)
 
 > ## ⚠️ Vive aquí de forma temporal: hay que extraerlo
 >
