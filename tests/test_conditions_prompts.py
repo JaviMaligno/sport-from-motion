@@ -73,6 +73,9 @@ def test_informed_prompt_is_symmetric_and_keeps_the_option_order():
     lens = [len(d) for d in MOVEMENT.values()]
     assert max(lens) <= 1.25 * min(lens)  # similar length: no sport gets more help
     assert not any(re.search(r"\d", d) for d in MOVEMENT.values())  # no numbers
+    size = re.compile(r"\b(tight|small|large|big|enclosed|confined|narrow|wide|vast|huge)"
+                      r"\s+(space|area|field|pitch|court|rink|surface)\b", re.I)
+    assert not any(size.search(d) for d in MOVEMENT.values())  # no playing-area size
     v = build_view(make_toy_clips(1)[0], "motion", np.random.default_rng(0))
     neutral, order = build_prompt(v, "image", CANDS, seed=4)
     informed, order_i = build_prompt(v, "image", CANDS, seed=4, style="informed")

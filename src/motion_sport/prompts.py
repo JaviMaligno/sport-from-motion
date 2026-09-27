@@ -86,7 +86,7 @@ MOVEMENT: dict[str, str] = {
               "occasional sprints. The team keeps a wide, loosely structured shape that "
               "shifts across the field as a block, its lines stretching and compressing "
               "as possession changes.",
-    "basketball": "Continuous play in a tight space with constant stop-start movement: "
+    "basketball": "Continuous play with constant stop-start movement: "
                   "short bursts, sharp cuts and quick changes of direction. Players gather "
                   "around one end at a time, circling and screening each other, then all "
                   "run to the other end together.",
@@ -102,23 +102,23 @@ MOVEMENT: dict[str, str] = {
                    "nearly static clusters, then spread out into staggered, flat lines that "
                    "advance or retreat across the field together, with frequent short "
                    "sprints into contact.",
-    "rugby_sevens": "Continuous, very open play with players spread thinly across a large "
-                    "space. Long sprints and wide sweeping runs dominate; brief tight "
+    "rugby_sevens": "Continuous, very open play with players spread thinly across the "
+                    "field. Long sprints and wide sweeping runs dominate; brief tight "
                     "clusters form around tackles and quickly break up into fast, stretched "
                     "attacking lines.",
     "rugby_league": "Continuous play in repeated short sets: after each tackle the players "
                     "quickly reset into two roughly flat, opposing lines with a gap between "
                     "them, which then advance and retreat together as attackers run straight "
                     "at the defence.",
-    "field_hockey": "Continuous play across a large space with frequent short accelerations "
+    "field_hockey": "Continuous play with frequent short accelerations "
                     "and quick changes of direction. The team keeps a spread-out, structured "
                     "shape that slides as a block, with small groups forming moving "
                     "triangles around the play.",
-    "ice_hockey": "Continuous, very fast play in an enclosed space. Movement is smooth and "
+    "ice_hockey": "Continuous, very fast play. Movement is smooth and "
                   "gliding, with wide curved paths, long coasting phases and loops behind "
                   "the play; groups rush together towards one end and then sweep back the "
                   "other way.",
-    "futsal": "Continuous play in a small space with constant rotation: players swap "
+    "futsal": "Continuous play with constant rotation: players swap "
               "positions in fluid patterns, with short sprints and quick changes of "
               "direction. The team keeps a compact diamond or square shape that moves "
               "together as possession changes.",
