@@ -439,3 +439,28 @@ def test_launcher_summary_names_the_systemic_failure(prepared):
                for line in out)
     assert any(line.startswith("fake__m__motion__sheet.jsonl: 1/24") and "REPORT AS SUCH" in line
                for line in out)
+
+
+@pytest.mark.parametrize("how", ["plan", "flag"])
+def test_exploratory_report_has_no_primary_contrast_and_no_holm(prepared, capsys, how):
+    from motion_sport import cli
+
+    for cond in ("motion", "motion_shuffled", "kinematics"):
+        pipeline.run_model(str(prepared), "fake:m", condition=cond, rep="sheet",
+                           complete=_coin(hash(cond) % 100))
+    assert [c["contrast"] for c in pipeline.report(str(prepared), n_boot=20)["primary_contrasts"]] \
+        == ["order"]  # the default: order is primary
+    if how == "plan":
+        (prepared / "plan.json").write_text(json.dumps({"cells": {}, "exploratory": True}))
+        assert pipeline.is_exploratory(prepared)
+    argv = ["--exploratory"] if how == "flag" else []
+    rep = pipeline.report(str(prepared), n_boot=20, exploratory=True if how == "flag" else None)
+    assert rep["exploratory"] and rep["primary_contrasts"] == [] and rep["holm"]["family_size"] == 0
+    order = next(c for c in rep["secondary_contrasts"] if c["contrast"] == "order")
+    assert not order["primary"] and "p_holm" not in order and "significant" not in order
+    assert {c["b"] for c in rep["secondary_contrasts"]} == {"motion_shuffled/sheet", "kinematics/sheet"}
+    cli.main(["report", "--items", str(prepared), "--n-boot", "20", *argv])
+    out = capsys.readouterr().out
+    assert "exploratory contrasts (not pre-registered; raw p):" in out
+    assert "primary contrasts" not in out and "secondary contrasts" not in out
+    assert "p_holm" not in out and not any(line.endswith(" *") for line in out.splitlines())

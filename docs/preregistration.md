@@ -152,11 +152,17 @@ primario que toca `motion/sheet` se calcularía con 200 clips en vez de 400
 .venv/bin/motion-sport report --items runs/final-primary --n-boot 10000 --json > runs/final/report_primary.json
 # A7b (D7), exploratoria: su propio directorio, fuera de la familia de Holm
 .venv/bin/python scripts/primary_view.py runs/final-d8 runs/final-d8-view --clips-from-models
-.venv/bin/motion-sport report --items runs/final-d8-view --n-boot 10000 --json > runs/final-d8/report_a7b.json
+.venv/bin/motion-sport report --items runs/final-d8-view --n-boot 10000 --exploratory --json > runs/final-d8/report_a7b.json
 ```
 
 `--clips-from-models` restringe los especialistas de la vista a los clips que se
 preguntaron a los modelos (D4).
+
+El informe de A7b es **exploratorio** entero: el lanzador marca `runs/final-d8/plan.json`
+con `"exploratory": true`, la vista lo hereda y `report` lo lee (`--exploratory` lo
+fuerza). Así no hay ningún contraste primario ni familia de Holm: `order` sale, con su
+nombre, en «exploratory contrasts (not pre-registered; raw p)», sin p_holm y sin
+asteriscos.
 
 `--n-boot 10000` en vez de 2.000: con 20 contrastes, el primer escalón de Holm exige
 p < 0,0025. Con 2.000 remuestreos el p mínimo es 2/2.001 ≈ 0,001, que ya está por debajo,

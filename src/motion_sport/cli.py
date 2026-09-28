@@ -171,6 +171,9 @@ def main(argv: list[str] | None = None) -> None:
     rp.add_argument("--tag", help="restrict to clips with this tag (e.g. pre_snap, static)")
     rp.add_argument("--n-boot", type=int, default=2000)
     rp.add_argument("--json", action="store_true")
+    rp.add_argument("--exploratory", action="store_true", default=None,
+                    help="no primary contrast, no Holm: every contrast is exploratory with raw p "
+                         "(automatic when plan.json says \"exploratory\": true, e.g. A7b)")
     rp.set_defaults(func=_report)
 
     a = ap.parse_args(argv)
@@ -221,12 +224,14 @@ def _short(sport: str) -> str:
 
 
 def _report(a) -> None:
-    rep = pipeline.report(a.items, a.n_boot, a.tag)
+    rep = pipeline.report(a.items, a.n_boot, a.tag, exploratory=a.exploratory)
     if a.json:
         print(json.dumps(rep, indent=2))
         return
     print(f"candidates: {rep['candidates']}  (chance = {1 / len(rep['candidates']):.2f})"
           + (f"  tag={rep['tag']}" if rep["tag"] else ""))
+    if rep.get("exploratory"):
+        print("EXPLORATORY view: no primary contrast, no Holm family; every p is raw")
     # acc = accuracy; bal = balanced accuracy; F1 = macro-F1; kappa = Cohen's kappa;
     # pc-acc = prior-corrected accuracy (response bias removed, leave-one-match-out)
     print(f"{'model':34} {'condition':15} {'repr':8} {'var':6} {'n':>4} {'acc':>5} {'95% CI':>12} "
@@ -284,7 +289,8 @@ def _report(a) -> None:
                   f"p_holm={_fmt_p(c['p_holm'])}{' *' if c['significant'] else ''}  (n={c['n']}"
                   f"{_few(c)}){_flag(c)}")
     if rep.get("secondary_contrasts"):
-        print("\nsecondary contrasts (exploratory; raw p, not corrected):")
+        print("\nexploratory contrasts (not pre-registered; raw p):" if rep.get("exploratory")
+              else "\nsecondary contrasts (exploratory; raw p, not corrected):")
         for c in rep["secondary_contrasts"]:
             print(f"  {_name(c['model']):34} {c['a']} - {c['b']}: {c['diff']:+.2f} "
                   f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']}{_few(c)}){_flag(c)}")

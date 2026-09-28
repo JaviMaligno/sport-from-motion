@@ -550,16 +550,29 @@ def plan_status(items_dir: str | pathlib.Path) -> list[dict]:
     return out
 
 
-def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
+def is_exploratory(items_dir: str | pathlib.Path) -> bool:
+    """True if `<items>/plan.json` marks the directory as exploratory (e.g. the A7b 8 s
+    cells, deviation D7: `run_plan.py write --exploratory`)."""
+    plan_path = pathlib.Path(items_dir) / "plan.json"
+    return plan_path.exists() and bool(json.loads(plan_path.read_text()).get("exploratory"))
+
+
+def report(items_dir: str, n_boot: int = 2000, tag: str | None = None,
+           exploratory: bool | None = None) -> dict:
     """Summaries for every prediction file, replicate groups and paired contrasts.
 
     Robust by design: rows of clips that are not in the current items are ignored
     (e.g. predictions left over from an older `prepare`), and contrasts are only
     computed between cells that exist, so a model with missing cells never breaks it.
+
+    `exploratory` (None = from plan.json, `is_exploratory`): no contrast is primary,
+    even the pairs of PRIMARY_CONTRASTS (their name is kept); no Holm family, raw p only.
     """
     from motion_sport.evaluate import holm, paired_difference, replicate_summary, summarize
 
     root = pathlib.Path(items_dir)
+    if exploratory is None:
+        exploratory = is_exploratory(root)
     cands = json.loads((root / "config.json").read_text())["candidates"]
     known = {i["clip_id"] for i in load_items(root)} if (root / "items.jsonl").exists() else None
     runs, ignored = {}, {"rows_not_in_items": 0, "files": []}
@@ -622,7 +635,7 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
         name = primary_of.get((a[1:], b[1:]))
         flagged = [cell_errors[k]["cell"] for k in (a, b) if cell_errors[k]["status"] == "flagged"]
         contrasts.append({"model": a[0], "a": _cell_label(*a[1:]), "b": _cell_label(*b[1:]),
-                          "primary": name is not None, "contrast": name,
+                          "primary": name is not None and not exploratory, "contrast": name,
                           **({"flagged_cells": flagged} if flagged else {}),
                           **paired_difference(cells[a], cells[b], n_boot)})
     primary = [c for c in contrasts if c["primary"]]
@@ -633,7 +646,7 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
         c = cell_errors[(meta["model"], meta["condition"], meta["repr"], meta["prompt_style"])]
         return {"cell_status": c["status"], "cell_errors": c["errors"], "cell_rows": c["n_rows"]}
 
-    return {"candidates": cands, "tag": tag,
+    return {"candidates": cands, "tag": tag, "exploratory": exploratory,
             "runs": {k: {**v["meta"], **v["summary"], **_status(v["meta"])}
                      for k, v in runs.items()},
             "replicates": replicates, "contrasts": contrasts,

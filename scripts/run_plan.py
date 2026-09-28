@@ -2,6 +2,8 @@
 
     # plan.json from the launcher's own command lines (one `motion-sport run` per line)
     bash scripts/final_run.sh ... | python scripts/run_plan.py write runs/final
+    # the A7b directory is exploratory: report prints no primary contrast and no Holm
+    bash scripts/final_run.sh ... | python scripts/run_plan.py write runs/final-d8 --exploratory
     # error summary: unrecovered errors per file, and planned cells with missing rows
     python scripts/run_plan.py check runs/final
     # the items must be the pre-registered set (final_run.sh refuses to start otherwise)
@@ -9,7 +11,8 @@
     # the exploratory 8 s cells (A7b, deviation D7): 3 sports, 40 frames, sheet only
     python scripts/run_plan.py preflight-a7b runs/final-d8 300
 
-`<items>/plan.json` is {"cells": {<prediction file stem>: planned rows}}. The stem is
+`<items>/plan.json` is {"cells": {<prediction file stem>: planned rows}} (plus
+"exploratory": true for an exploratory directory). The stem is
 the file `motion-sport run` writes for that cell (pipeline._pred_path), so a planned
 cell that never started shows up as missing, not as silently absent. The planned rows
 come from the `--limit` of each command (the first N of the interleaved order). A
@@ -62,13 +65,19 @@ def _same_dir(a: str | pathlib.Path, b: str | pathlib.Path) -> bool:
     return os.path.realpath(a) == os.path.realpath(b)
 
 
-def write_plan(items_dir: str | pathlib.Path, lines: list[str]) -> pathlib.Path:
+def write_plan(items_dir: str | pathlib.Path, lines: list[str],
+               exploratory: bool = False) -> pathlib.Path:
     """Merge the cells of `lines` into <items>/plan.json (a relaunch with MODELS=<one
-    model> must not drop the other models' cells)."""
+    model> must not drop the other models' cells). `exploratory` marks the whole
+    directory as such ("exploratory": true, sticky): `report` then has no primary
+    contrast and no Holm family (A7b, deviation D7)."""
     path = pathlib.Path(items_dir) / "plan.json"
-    cells = json.loads(path.read_text())["cells"] if path.exists() else {}
+    old = json.loads(path.read_text()) if path.exists() else {}
+    cells = old.get("cells", {})
     cells.update(plan_from_commands(items_dir, lines)["cells"])
-    path.write_text(json.dumps({"cells": cells}, indent=2, sort_keys=True) + "\n")
+    plan = {"cells": cells, **({"exploratory": True}
+                               if exploratory or old.get("exploratory") else {})}
+    path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
     return path
 
 
@@ -190,6 +199,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("write", help="plan.json from run commands on stdin")
     w.add_argument("items")
+    w.add_argument("--exploratory", action="store_true",
+                   help="mark the directory exploratory (report: no primary contrast, no Holm)")
     c = sub.add_parser("check", help="unrecovered errors and missing planned rows")
     c.add_argument("items")
     f = sub.add_parser("preflight", help="the items must be the pre-registered set")
@@ -208,8 +219,10 @@ def main() -> None:
         cfg = json.loads((pathlib.Path(a.items) / "config.json").read_text())
         print(f"preflight ok: {a.items} ({cfg['preset']}, {cfg['clips_kept_by_sport']})")
     elif a.cmd == "write":
-        path = write_plan(a.items, sys.stdin.read().splitlines())
-        print(f"{path}: {len(json.loads(path.read_text())['cells'])} planned cells")
+        path = write_plan(a.items, sys.stdin.read().splitlines(), a.exploratory)
+        plan = json.loads(path.read_text())
+        print(f"{path}: {len(plan['cells'])} planned cells"
+              + (" (exploratory)" if plan.get("exploratory") else ""))
     else:
         lines = check(a.items)
         print("\n".join(lines) if lines else "no unrecovered errors, no missing planned rows")

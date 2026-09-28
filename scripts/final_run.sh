@@ -98,10 +98,12 @@ error_summary() {  # unrecovered errors per file (> 2 % flagged) + planned cells
 
 write_plan() {  # <items>/plan.json: planned rows per prediction file, from these very commands
   # (each directory keeps only the commands that run on it). Any failure -> non-zero.
+  # $D8_ITEMS is marked exploratory: its report has no primary contrast and no Holm (D7).
   local d m
   for d in "$ITEMS" "$D8_ITEMS"; do
     for m in $MODELS; do commands_for "$m"; done \
-      | .venv/bin/python scripts/run_plan.py write "$d" || return 1
+      | .venv/bin/python scripts/run_plan.py write "$d" \
+          $([ "$d" = "$D8_ITEMS" ] && echo --exploratory) || return 1
   done
 }
 

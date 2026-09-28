@@ -99,8 +99,12 @@ def build_view(items: str | pathlib.Path, out: str | pathlib.Path,
         planned = tuple(_safe(m) + "__" for m in PLANNED)
         cells = {k: v for k, v in json.loads(plan.read_text())["cells"].items()
                  if not re.search(r"__r\d+$", k) and k.startswith(planned)}
+        view_plan = {"cells": cells}
+        if json.loads(plan.read_text()).get("exploratory"):  # A7b stays exploratory in its view
+            view_plan["exploratory"] = True
+            info["exploratory"] = True
         (out / "plan.json").unlink(missing_ok=True)
-        (out / "plan.json").write_text(json.dumps({"cells": cells}, indent=2, sort_keys=True) + "\n")
+        (out / "plan.json").write_text(json.dumps(view_plan, indent=2, sort_keys=True) + "\n")
         info["planned_cells"] = len(cells)
     return info
 
@@ -123,7 +127,9 @@ def main() -> None:
         for name, (before, after) in info["restricted"].items():
             print(f"  {name}: {before} -> {after} rows")
     if "planned_cells" in info:
-        print(f"plan.json: {info['planned_cells']} planned replicate-1 cells of the planned models")
+        print(f"plan.json: {info['planned_cells']} planned replicate-1 cells of the planned models"
+              + (" (exploratory: report has no primary contrast, no Holm)"
+                 if info.get("exploratory") else ""))
 
 
 if __name__ == "__main__":

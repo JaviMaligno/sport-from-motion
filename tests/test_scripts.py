@@ -384,8 +384,11 @@ def test_final_run_survives_a_failing_cell_and_runs_every_command(tmp_path):
     for m in ("azure-openai:gpt-5.6-sol", "vertex:gemini-3.1-pro-preview"):
         mine = [c for c in calls if f"--model {m} " in c]
         assert "--items runs/final-d8" in mine[-1] and "--items runs/final-d8" in mine[-2]
-    log = (tmp_path / "log" / "python.log").read_text()
-    assert log.count("run_plan.py write") == 2 and log.count("run_plan.py check") == 2
+    log = (tmp_path / "log" / "python.log").read_text().splitlines()
+    assert [line for line in log if " write " in line] == [
+        "scripts/run_plan.py write runs/final",
+        "scripts/run_plan.py write runs/final-d8 --exploratory"]  # A7b is exploratory
+    assert sum(" check " in line for line in log) == 2
 
 
 def _dry_run_cells(tmp_path, models):
@@ -426,3 +429,28 @@ def test_estimate_run_plan_matches_the_launcher_order(tmp_path):
     for m in ("azure-openai:gpt-5.6-sol", "vertex:gemini-3.1-pro-preview"):
         want = [(c, r, s, k, n, items) for c, r, s, k, n, _fmt, items in est.plan()[m]]
         assert _dry_run_cells(tmp_path / m.replace(":", "_"), m) == want
+
+
+def test_exploratory_plan_is_sticky_and_reaches_the_view(tmp_path):
+    from motion_sport import pipeline
+
+    pv, rp = _script("primary_view"), _script("run_plan")
+    items = _prepared(tmp_path)
+    line = (f"motion-sport run --items {items} --model azure-openai:gpt-5.6-sol --condition {{}} "
+            "--repr sheet --limit 10")
+    rp.write_plan(items, [line.format("motion")], exploratory=True)
+    rp.write_plan(items, [line.format("motion_shuffled")])  # a relaunch keeps the mark
+    plan = json.loads((items / "plan.json").read_text())
+    assert plan["exploratory"] is True and len(plan["cells"]) == 2
+    for cond in ("motion", "motion_shuffled"):
+        pipeline.run_model(str(items), "azure-openai:gpt-5.6-sol", condition=cond, rep="sheet",
+                           limit=10, complete=_fake)
+    info = pv.build_view(items, tmp_path / "view")
+    assert info["exploratory"] and pipeline.is_exploratory(tmp_path / "view")
+    rep = pipeline.report(str(tmp_path / "view"), n_boot=20)
+    assert rep["primary_contrasts"] == [] and any(c["contrast"] == "order" for c in rep["contrasts"])
+    # a plain directory is not exploratory
+    other = tmp_path / "other"
+    other.mkdir()
+    rp.write_plan(other, [])
+    assert "exploratory" not in json.loads((other / "plan.json").read_text())
