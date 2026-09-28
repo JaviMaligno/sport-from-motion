@@ -66,7 +66,8 @@ motion-sport prepare --clips data/clips --out runs/pilot-raw --preset raw --cond
 # vídeo mp4 para Gemini (necesita .[video]) y N jugadores al azar en vez de los centrales
 motion-sport prepare --clips data/clips --out runs/pilot-video --reprs sheet,video --player-mode random
 
-# 3. Comprobar que los controles funcionan (nuisance debe salir al azar en strict)
+# 3. Comprobar el CV y la señal (nuisance debe salir al azar en strict: con los controles
+#    sus variables son constantes, así que comprueba los folds, no los atajos)
 motion-sport baseline --items runs/pilot-strict --features nuisance
 motion-sport baseline --items runs/pilot-strict --features kinematic
 

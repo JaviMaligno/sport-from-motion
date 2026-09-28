@@ -56,19 +56,21 @@ quede al azar (exploratorio).
 
 ## 3. Ítems
 
-- **Conjunto**: `runs/final`, reconstruido el 2026-09-28 desde `data/pool_final2`
-  (37.613 clips; D8), antes de cualquier llamada a un modelo. Preset `strict_smooth`
-  (suavizado gaussiano, σ = 2 fotogramas), ventanas de 4 s a 5 Hz (20 fotogramas),
-  `--per-sport 400`, las 5 condiciones y las representaciones `sheet`, `trails`, `text`
-  y `video`. Además del preset:
+- **Conjunto**: `runs/final`, reconstruido por segunda vez el 2026-09-28 desde
+  `data/pool_final3` (37.052 clips; D8 y D17), antes de cualquier llamada a un modelo.
+  Preset `strict_smooth` (suavizado gaussiano, σ = 2 fotogramas), ventanas de 4 s a 5 Hz
+  (20 fotogramas), `--per-sport 400`, las 5 condiciones y las representaciones `sheet`,
+  `trails`, `text` y `video`. Además del preset:
   - **Jugadores**: N = 10 **elegidos al azar** en cada clip (`--player-mode random
     --n-players 10`), no los 10 más centrales (hueco A14; D5 y D8).
   - **Techo de velocidad**: se rechaza el clip si algún jugador conservado da un paso de
     más de 12 m/s (`max_speed_ms`; D2).
-  - **Fútbol americano**: un clip por jugada, que empieza en una fase **aleatoria**
-    después del snap (D1).
+  - **Fútbol americano**: un clip por jugada, que empieza en una fase **aleatoria** entre
+    **1,0 s** después del snap y el final de la jugada menos 4 s (D1 y D16).
   - **Balonmano**: 6 partidos. Las dos partes del partido de TeamTrack forman un solo
     grupo, `tt-handball` (D3).
+  - **Fútbol de TeamTrack**: un solo partido, `tt-soccer`. Sus dos ficheros son una
+    misma grabación con una fecha mal escrita (D10).
 
   Los parámetros exactos quedan en `runs/final/config.json`: `controls`, clips de entrada
   y conservados por deporte y por fuente, y rechazos por motivo.
@@ -76,15 +78,15 @@ quede al azar (exploratorio).
 
   | Deporte | Fuentes (clips) | Clips | Partidos |
   |---|---|---|---|
-  | Fútbol americano | NFL Big Data Bowl 2023, semanas 1-8, fase aleatoria (D1) | 400 | 122 |
-  | Baloncesto | NBA SportVU 2015-16 (386) + TeamTrack (12) | 398 | 31 + 1 |
-  | Balonmano | EIGD-H, 5 partidos de la HBL medidos con Kinexon (334) + TeamTrack (59) | 393 | 5 + 1 |
-  | Fútbol | SkillCorner Open Data, solo posiciones detectadas (224) + Metrica (57) + TeamTrack (51) | 332 | 10 + 2 + 2 |
+  | Fútbol americano | NFL Big Data Bowl 2023, semanas 1-8, fase aleatoria desde 1,0 s tras el snap (D1, D16) | 400 | 122 |
+  | Baloncesto | NBA SportVU 2015-16 (385) + TeamTrack (12) | 397 | 31 + 1 |
+  | Balonmano | EIGD-H, 5 partidos de la HBL medidos con Kinexon (334) + TeamTrack (63) | 397 | 5 + 1 |
+  | Fútbol | SkillCorner Open Data, solo posiciones detectadas (248) + Metrica (62) + TeamTrack (27) | 337 | 10 + 2 + 1 |
 
-  De 1.600 clips de entrada (400 por deporte) se conservan 1.523. Rechazos: SkillCorner
-  62 por número de jugadores (22 %, el único aviso de `prepare`), TeamTrack 12 por
-  teletransporte (9 %), SportVU 1 por teletransporte y 1 por jugadores, Metrica 1 por
-  teletransporte.
+  De 1.600 clips de entrada (400 por deporte) se conservan 1.531, de 173 partidos.
+  Rechazos: SkillCorner 60 de 308 por número de jugadores (19 %, el único aviso de
+  `prepare`), TeamTrack 6 de 108 por teletransporte, SportVU 2 por teletransporte y 1 por
+  jugadores. `prepare` tardó 26 minutos (`runs/prepare_final3.log`).
 - **Preflight**. El lanzador se niega a arrancar (`scripts/run_plan.py preflight`) si el
   preset no es `strict_smooth`; si en `controls` no están exactamente `player_mode =
   random`, `n_players = 10`, `n_frames = 20`, `smooth = 2.0` y `max_speed_ms = 12.0`; si
@@ -92,27 +94,29 @@ quede al azar (exploratorio).
   etiqueta `random_phase`; si algún deporte tiene menos de 100 clips; si faltan los
   prompts informados; si falta una representación planificada, o si en alguna de ellas
   falta una de las 5 condiciones que admite. El de A7b (`preflight-a7b`) fija igual
-  `smooth = 2.0` y `max_speed_ms = 12.0`, con `n_frames = 40`.
+  `smooth = 2.0` y `max_speed_ms = 12.0`, con `n_frames = 40`. Los valores booleanos no
+  valen como números (D13).
 - **Opciones**: las de `config.json` (`candidates`), es decir, los 4 deportes sin
   distractores. Azar = 1/|candidates| = 0,25.
 - **Muestra**: los **400 primeros clips** del orden `interleave` (reparto por
   deporte y, dentro de cada deporte, por partido; la clave depende solo del clip). Son
-  100 por deporte y **los mismos clips en todas las celdas**. Cubren 152 partidos
-  (fútbol americano 100, baloncesto 32, fútbol 14, balonmano 6). Por fuente: NFL 100,
-  SportVU 97, EIGD 84, SkillCorner 71, Metrica 14 y TeamTrack 34 (3 de baloncesto, 16 de
-  balonmano y 15 de fútbol). Las réplicas 2 y 3 usan los 200 primeros (50 por deporte),
+  100 por deporte y **los mismos clips en todas las celdas**. Cubren 151 partidos
+  (fútbol americano 100, baloncesto 32, fútbol 13, balonmano 6). Por fuente: NFL 100,
+  SportVU 97, EIGD 84, SkillCorner 77, Metrica 15 y TeamTrack 27 (3 de baloncesto, 16 de
+  balonmano y 8 de fútbol). Las réplicas 2 y 3 usan los 200 primeros (50 por deporte),
   que son un subconjunto de los 400.
 - **Celda A7b, clips de 8 s (secundaria y exploratoria; D7)**: `runs/final-d8`, con los
   mismos controles (`strict_smooth`, N = 10 al azar, 12 m/s) pero ventanas de **8 s**
   (`--n-frames 40`) y **3 deportes**: baloncesto, balonmano y fútbol (azar 1/3). No hay
   fútbol americano porque solo 42 clips NFL de mitad de jugada llegan a 8 s. Sale de
-  `data/pool_d8_final2`, que son los clips de 8 s del barrido A7 con el balonmano de
-  TeamTrack reagrupado como en D3. Se conservan 1.069 clips (baloncesto 387, balonmano
-  394, fútbol 288) de 52 partidos. Muestra: los **300 primeros** del orden `interleave`
-  (100 por deporte, 52 partidos). Celdas: `motion/sheet` y `motion_shuffled/sheet`, con
-  prompt neutro. La hoja sigue teniendo 8 fotogramas: a 8 s quedan a unos 1,1 s uno de
-  otro (a 4 s, a unos 0,55 s). Tiene su propio preflight: `scripts/run_plan.py
-  preflight-a7b`.
+  `data/pool_d8_final3`, que son los clips de 8 s del barrido A7 con el balonmano y el
+  fútbol de TeamTrack reagrupados como en D3 y D10. De 1.200 clips de entrada se
+  conservan 1.063 (baloncesto 387, balonmano 394, fútbol 282; por fuente SportVU 375,
+  EIGD 333, SkillCorner 195, Metrica 60 y TeamTrack 100) de 51 partidos. Muestra: los
+  **300 primeros** del orden `interleave` (100 por deporte, 51 partidos). Celdas:
+  `motion/sheet` y `motion_shuffled/sheet`, con prompt neutro. La hoja sigue teniendo 8
+  fotogramas: a 8 s quedan a unos 1,1 s uno de otro (a 4 s, a unos 0,55 s). Tiene su
+  propio preflight: `scripts/run_plan.py preflight-a7b`.
 
 ## 4. Celdas y n
 
@@ -131,7 +135,8 @@ luego las secundarias pre-registradas, `kinematics/sheet`, `kinematics_solo/shee
 `motion/trails`, vídeo (Gemini) y réplicas; y **al final** A7b (`motion/sheet` y
 `motion_shuffled/sheet` a 8 s, todos menos Jev), que es exploratoria. Si la corrida se
 corta, lo que falte es secundario o exploratorio. Si falla algo antes de la primera
-llamada (preflight o `plan.json`), el lanzador sale con error y no llama a ningún modelo.
+llamada (preflight o `plan.json`), el lanzador sale con error y no llama a ningún modelo;
+una celda que falla no para las demás del mismo modelo (D14).
 
 Ajustes: `--max-tokens 1024` (más el margen de razonamiento del backend, 16.384),
 `--temperature 0` pedido. Los modelos que rechazan `temperature` (gpt-5.6, Sonnet 5 en
@@ -162,7 +167,7 @@ El informe de A7b es **exploratorio** entero: el lanzador marca `runs/final-d8/p
 con `"exploratory": true`, la vista lo hereda y `report` lo lee (`--exploratory` lo
 fuerza). Así no hay ningún contraste primario ni familia de Holm: `order` sale, con su
 nombre, en «exploratory contrasts (not pre-registered; raw p)», sin p_holm y sin
-asteriscos.
+asteriscos (D15).
 
 `--n-boot 10000` en vez de 2.000: con 20 contrastes, el primer escalón de Holm exige
 p < 0,0025. Con 2.000 remuestreos el p mínimo es 2/2.001 ≈ 0,001, que ya está por debajo,
@@ -196,7 +201,7 @@ clips cubren decenas de partidos. Si un modelo no puede correr (por ejemplo, Opu
 sin habilitar en Vertex), la familia es la que exista (16 contrastes). Se dice así, y
 el modelo no se sustituye por otro. `report` lo hace solo: un modelo con **todas** sus
 filas en error sale de los contrastes y de la familia (`excluded_models`, D4), y una celda
-con más de un 50 % de errores no recuperados, también (sección 8). Las celdas
+con más de un 50 % de errores no recuperados, también (sección 8, D12). Las celdas
 A7b (8 s) tampoco entran en la familia: van en otro directorio y se analizan aparte, como
 exploratorias (sección 7, D7).
 
@@ -248,7 +253,8 @@ la sección 6.
 - **Cortes**: por deporte, por fuente (p. ej. balonmano EIGD frente a TeamTrack) y
   `--tag static`. Con menos de 5 partidos no hay IC (`too_few_matches`).
 - **Especialistas** (MiniRocket, DeepSets, baselines `nuisance`/`tempo`/`kinematic`),
-  como referencia de «la señal está». Se entrenan con CV agrupada por partido sobre
+  como referencia de «la señal está». Con estos controles `nuisance` es degenerado (sus
+  variables son constantes, D11) y solo sirve para comprobar el CV. Se entrenan con CV agrupada por partido sobre
   todos los clips del conjunto, pero **se comparan sobre los mismos clips que los
   modelos**: la vista primaria (`primary_view.py --clips-from-models`, D4) los restringe
   a los 400 clips preguntados. No forman parte de los contrastes de este pre-registro.
@@ -282,7 +288,10 @@ la sección 6.
   systemic failure` (`excluded_cells` en el JSON). Es la misma regla que la de un modelo
   sin ninguna respuesta (D4), aplicada celda a celda. El umbral se cuenta sobre las filas
   presentes de la celda (todas sus réplicas), porque las filas que faltan no son errores
-  (siguiente punto). Se fija antes de cualquier dato de modelo (sección 11).
+  (siguiente punto). Se fija antes de cualquier dato de modelo (D12). Si la celda excluida
+  es `motion/sheet` neutro, ese modelo se queda sin ninguno de sus 4 contrastes primarios
+  (los cuatro la usan) y la familia de Holm pierde esos 4. En la sección 6 queda como
+  «sin evidencia de que vea movimiento», con la causa dicha: no se pudo medir.
 - **Filas que faltan** (D4). Una celda planificada con menos filas que su `--limit`, o
   sin fichero (p. ej. una corrida cortada), no es un error registrado: no hay respuesta
   que contar. El lanzador es reanudable y se relanza con los mismos ajustes hasta que
@@ -315,15 +324,17 @@ la celda afectada y se informan las dos versiones en «Desviaciones».
 ## 11. Desviaciones
 
 Todas las de 2026-09-28 son **anteriores a cualquier dato de modelo sobre el dataset
-final**. Cuando se escribieron, ningún modelo había respondido sobre `runs/final`, ni sobre
-el conjunto anterior (`runs/final-v1`) ni sobre `runs/final-d8`: los tres directorios
-`predictions/` contienen solo especialistas. Los especialistas (MiniRocket, DeepSets y los
-baselines) sí se corrieron, sobre el conjunto viejo y sobre el nuevo. No son datos de
+final**. Cuando se escribieron, ningún modelo había respondido sobre `runs/final` ni
+`runs/final-d8`, ni sobre los conjuntos anteriores (`runs/final-v1`, `runs/final-v2` y
+`runs/final-d8-v1`): los cinco directorios `predictions/` contienen solo especialistas
+(comprobado de nuevo al escribir D10-D17). Los especialistas (MiniRocket, DeepSets y los
+baselines) sí se corrieron, sobre los conjuntos viejos y sobre los nuevos. No son datos de
 modelo en el sentido de este pre-registro (sección 7): sirvieron para encontrar los
-problemas y para comprobar el conjunto reconstruido, y sus números están abajo. Las
+problemas y para comprobar los conjuntos reconstruidos, y sus números están abajo. Las
 desviaciones cambian cómo se construye el conjunto de ítems, añaden una celda exploratoria
-(A7b) y corrigen texto. No cambian las hipótesis, las celdas primarias, los modelos ni la
-familia de Holm.
+(A7b), fijan reglas mecánicas del informe y del lanzador, y corrigen texto. No cambian las
+hipótesis, las celdas primarias ni los modelos. La familia de Holm solo cambia por la
+regla de fallo sistémico (D12), que saca contrastes que no miden al modelo.
 
 Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00):
 
@@ -335,9 +346,17 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D4 | `report` y vista primaria: modelos que no corren, filas que faltan, especialistas sobre los mismos clips | casos que el pre-registro no resolvía de forma mecánica | verificador del pre-registro | `5bbdd24` |
 | D5 | El preflight exige el conjunto nuevo | que no dependa de la memoria | `runs/final-v1` no lo pasa | `b2dffa2` |
 | D6 | `prepare --n-frames`, relleno de series de MiniRocket; ablaciones A7 y A8 | herramientas del barrido de duración | sin efecto sobre la corrida (20 fotogramas) | `a722feb`, `b1306f5` |
-| D7 | Celda A7b: clips de 8 s, exploratoria | a 8 s los especialistas mejoran (C11) | especialistas sobre `runs/final-d8` | este commit |
-| D8 | Conjunto reconstruido con N = 10 al azar; secciones 3, 4, 7, 8 y 10 al día | la selección central quitaba señal de forma desigual (A8) y la sección 3 no describía las fuentes reales | A8 (C10); especialistas sobre el conjunto nuevo | este commit |
-| D9 | Corregida la frase sobre la resolución del bootstrap | era falsa | 2/2.001 ≈ 0,001 < 0,0025 | este commit |
+| D7 | Celda A7b: clips de 8 s, exploratoria | a 8 s los especialistas mejoran (C11) | especialistas sobre `runs/final-d8` | `75feb4e` |
+| D8 | Conjunto reconstruido con N = 10 al azar; secciones 3, 4, 7, 8 y 10 al día | la selección central quitaba señal de forma desigual (A8) y la sección 3 no describía las fuentes reales | A8 (C10); especialistas sobre el conjunto nuevo | `75feb4e` |
+| D9 | Corregida la frase sobre la resolución del bootstrap | era falsa | 2/2.001 ≈ 0,001 < 0,0025 | `75feb4e` |
+| D10 | El fútbol de TeamTrack es un partido (`tt-soccer`) | sus dos ficheros son una grabación continua con la fecha mal escrita | verificador; costura de 900 s: mismas 22 pistas a 0,61 m de mediana | `eec85c4` |
+| D11 | Corrección: el baseline `nuisance` es degenerado y no es evidencia; se retira la «firma de TeamTrack» de D7 y D8 | tras los controles sus 4 variables son constantes | `baselines.nuisance_features`; spread = 1 ± ruido de float32 | `DOCS_COMMIT` |
+| D12 | Regla de fallo sistémico por celda (> 50 % de errores) | una celda caída no mide al modelo y metería un contraste falso en Holm | tests de `report` | `5cddffe` |
+| D13 | El preflight fija fotogramas, suavizado, techo, candidatos y celdas | que un conjunto mal construido no pase | tests de mutación | `a62d4e4` |
+| D14 | Lanzador: aborta si falla la contabilidad; A7b al final | una celda exploratoria no debe ir antes que las secundarias pre-registradas, y un `plan.json` fallido no puede dejar llamar | tests del lanzador con `python` falso; el script viejo falla 4 | `c6b355d` |
+| D15 | Informe exploratorio para A7b (sin Holm) | en D7 `order` salía como primario con Holm propio | tests de `report` | `95de80b` |
+| D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `DOCS_COMMIT` (datos: `runs/ingest_nflrand10.log`) |
+| D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `DOCS_COMMIT` |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
@@ -372,6 +391,11 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
   todos. Es una propiedad de la fuente (jugadas cortas) que no se puede corregir sin otra
   fuente (A12), y se informa como limitación. Como cada clip lleva `meta.snap_offset_s`,
   el recall de fútbol americano por desfase se da como análisis exploratorio (sección 7).
+- **Actualizado por D16 (2026-09-28).** El mínimo tras el snap sube de 0,5 s a 1,0 s. Los
+  números de «Coste conocido» y «Limitación» son los del ingest a 0,5 s
+  (`data/clips_nflrand`), que ya no está en `runs/final`. Corrección de redacción: el
+  «67 % a menos de 1,0 s» es el 66,7 % que empieza **a 1,0 s o antes**; estrictamente
+  antes de 1,0 s es el 61 %.
 
 ### D2 (2026-09-28). Techo físico de velocidad: fuera los «teletransportes» del tracker
 
@@ -479,7 +503,8 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
 
 - **Qué cambia.** Los 5 modelos de chat responden también `motion/sheet` y
   `motion_shuffled/sheet`, con prompt neutro, sobre los 300 primeros clips de
-  `runs/final-d8` (sección 3), justo después de sus celdas primarias. Son 3.000 llamadas
+  `runs/final-d8` (sección 3), ~~justo después de sus celdas primarias~~ **al final de
+  todas sus celdas** (sustituido por D14). Son 3.000 llamadas
   más, unos 68 USD (anexo B). Jev no entra: solo lee texto y A7b es de imagen.
   `final_run.sh` las lanza con `--items runs/final-d8 --limit 300`, las planifica en
   `runs/final-d8/plan.json` y comprueba el conjunto con `run_plan.py preflight-a7b`
@@ -494,16 +519,25 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
 - **Qué no es.** No entra en la familia de Holm ni en la clasificación de la sección 6.
   Tampoco es un contraste 8 s − 4 s emparejado: los clips son otros y las opciones son 3
   en vez de 4. Se analiza con `report` sobre su propio directorio (sección 5), con p sin
-  corregir. En ese informe `order` sale con la etiqueta de contraste primario y con un
-  Holm propio solo porque es la misma pareja de celdas; esa etiqueta no aplica aquí.
-- **Límites conocidos.** El `nuisance` a 8 s acierta al azar (0,35 [0,20; 0,47], kappa
+  corregir. ~~En ese informe `order` sale con la etiqueta de contraste primario y con un
+  Holm propio solo porque es la misma pareja de celdas; esa etiqueta no aplica aquí.~~
+  **Sustituido por D15:** el informe de A7b se genera en modo exploratorio, sin
+  contrastes primarios ni Holm, y `order` sale entre los exploratorios con p sin corregir.
+- **Límites conocidos.** ~~El `nuisance` a 8 s acierta al azar (0,35 [0,20; 0,47], kappa
   0,00), pero porque contesta «balonmano» en 829 de 1.069 clips: es un clasificador
   degenerado, y eso es una prueba más débil de que no quedan atajos que un nuisance que
-  reparte sus respuestas. En los especialistas, `motion − motion_shuffled` a 8 s es +0,07
+  reparte sus respuestas.~~ **Retirado (D11):** tras los controles las variables de
+  `nuisance` son constantes, así que su resultado no dice nada sobre atajos, ni a favor ni
+  en contra. En los especialistas, `motion − motion_shuffled` a 8 s es +0,07
   [0,03; 0,10]; en `abl-d8_noaf`, con selección central y sin techo de velocidad, era
   +0,12.
+- **Números de un conjunto anterior.** Los especialistas de este apartado son de
+  `runs/final-d8-v1` (ahora movido). Los del conjunto reconstruido están en D17.
 
 ### D8 (2026-09-28). Conjunto de ítems reconstruido; secciones 3, 4, 7, 8 y 10 al día
+
+> Este conjunto es ahora `runs/final-v2`. Se reconstruyó otra vez (D17) tras D10 y D16;
+> las cifras vigentes están en la sección 3 y en D17.
 
 - **Qué cambia.**
   - El `runs/final` del 2026-09-27 pasa a `runs/final-v1` (ningún modelo llegó a
@@ -529,21 +563,25 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
   La selección al azar trata igual a todos los deportes y no depende de una regla
   nuestra.
 - **Comprobación con especialistas** sobre el conjunto nuevo (todos los clips; azar
-  0,25): MiniRocket `motion` 0,82 [0,79; 0,85] (v1: 0,75), `motion_shuffled` 0,70,
+  0,25; es `runs/final-v2`, reconstruido otra vez en D17): MiniRocket `motion` 0,82 [0,79; 0,85] (v1: 0,75), `motion_shuffled` 0,70,
   `kinematics` 0,75, `kinematics_solo` 0,72; DeepSets `motion` 0,81 y `formation` 0,54;
-  baseline cinemático 0,69, `tempo` 0,53 y `nuisance` 0,29 [0,21; 0,39] (kappa 0,04).
-  En los 400 primeros: MiniRocket `motion` 0,80 [0,75; 0,85] y `nuisance` 0,31 [0,22;
-  0,41]. MiniRocket `motion − motion_shuffled` +0,12 [0,09; 0,15]. Entre fuentes
+  baseline cinemático 0,69, `tempo` 0,53 y `nuisance` 0,29 [0,21; 0,39] (kappa 0,04;
+  degenerado, D11). En los 400 primeros: MiniRocket `motion` 0,80 [0,75; 0,85] y
+  `nuisance` 0,31 [0,22; 0,41]. MiniRocket `motion − motion_shuffled` +0,12 [0,09; 0,15]. Entre fuentes
   (TeamTrack fuera del entrenamiento, `runs/final2-xs`), MiniRocket da 0,97 dentro de las
   fuentes y **0,95** en TeamTrack, frente a 0,94 → 0,86 en el conjunto viejo.
 - **Límites conocidos.**
-  - El `nuisance` nunca contesta «fútbol» y contesta «balonmano» en la mayoría de los
+  - ~~El `nuisance` nunca contesta «fútbol» y contesta «balonmano» en la mayoría de los
     clips de TeamTrack, sea cual sea su deporte (46 de 59 de balonmano, 9 de 12 de
     baloncesto, 13 de 51 de fútbol). Queda una firma de TeamTrack en las variables de
     nuisance aunque su balonmano sea un solo grupo. Un modelo que leyera esa firma
     acertaría más en el balonmano de TeamTrack y menos en su fútbol y su baloncesto. En
     los 400 primeros, TeamTrack son 34 clips (16 de balonmano). El corte por fuente
-    (sección 7) lo deja ver, y se informa como limitación.
+    (sección 7) lo deja ver, y se informa como limitación.~~ **Retirado (D11): era falso.**
+    Las 4 variables de `nuisance` son constantes tras los controles, y lo que parecía una
+    firma de TeamTrack era ruido de redondeo de float32 que `StandardScaler` amplifica. La
+    pregunta de si queda una firma de la fuente se contesta con otro test, dentro del
+    fútbol y con variables de movimiento (D17).
   - El `tempo` sube de 0,43 a 0,53, sobre todo por EIGD (recall 0,77): el ritmo del
     balonmano medido con Kinexon es distinto. `tempo` es un baseline de atajo que
     `strict_smooth` no pretende quitar (lo quitaría `strict_tempo`). Queda en la tabla de
@@ -559,6 +597,263 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
 - **Evidencia.** El verificador del pre-registro (2026-09-28), comprobado a mano con la
   fórmula de la sección 5.
 
+### D10 (2026-09-28). El fútbol de TeamTrack es un partido, no dos
+
+- **Qué cambia.** Todos los segmentos de fútbol de TeamTrack comparten el `match_id`
+  `tt-soccer`. `scripts/teamtrack_to_long_csv.py` lo hace así en las ingestas nuevas, y
+  `scripts/relabel_match.py` documenta el reetiquetado de los clips ya ingestados. Se ha
+  aplicado sobre copias: `data/clips_tt_regroup` (390 clips: 174 de `20200220` y 216 de
+  `20220220`) y `data/pool_d8_final3`, una copia de enlaces de `pool_d8_final2` con 192
+  clips reetiquetados (84 + 108). `data/clips`, `pool_final2` y `pool_d8_final2` no se
+  tocan.
+- **Por qué.** TeamTrack publica su único partido de fútbol como dos ficheros,
+  `F_20200220_1` (0-900 s) y `F_20220220_1` (900-1.980 s). La segunda fecha es una errata:
+  es la misma grabación, continua. El verificador lo detectó por la fecha. En la costura
+  de los 900 s, los mismos 22 índices de pista están a una mediana de 0,61 m (máximo
+  1,70 m) de donde los dejó el primer fichero, más cerca que entre dos segmentos del mismo
+  fichero (mediana 3,97 m). Como en D3, dos grupos que no son independientes estrechan los
+  IC e inflan el CV agrupado. El verificador midió el efecto en el conjunto anterior: el
+  recall del baseline cinemático en el fútbol de TeamTrack era 0,608 con dos grupos y
+  0,569 con uno.
+- **Coste conocido.** El fútbol pierde un grupo (13 partidos en los 400 primeros, antes
+  14). El reparto por partido de `interleave` da ahora a TeamTrack un turno en vez de dos,
+  así que su fútbol pesa menos: 27 clips en `runs/final` (antes 51) y 8 en los 400
+  primeros (antes 15).
+
+### D11 (2026-09-28). Corrección: el baseline `nuisance` es degenerado
+
+- **Qué cambia.** Nada en el código ni en el análisis. Se corrige cómo se lee un número.
+  El baseline `nuisance` usa 4 variables por clip: número de jugadores, fps, duración y
+  dispersión (`baselines.nuisance_features`). Con los controles de `runs/final` las cuatro
+  son **constantes por construcción**: N = 10, 5 fps, 4 s (8 s en `runs/final-d8`) y
+  dispersión = 1, porque la normalización `spread` la fija (desviación típica 4,4 × 10⁻⁸
+  en `runs/final`, ruido de float32). Un clasificador sobre variables constantes no
+  puede aprender nada: cualquier diferencia entre sus respuestas viene de ese ruido de
+  redondeo, que `StandardScaler` amplifica al dividir por una desviación típica casi nula.
+  Medido por fuente, el ruido es de −25 ± 45 × 10⁻⁹ en todas.
+- **Qué se retira.**
+  - D8, «límites conocidos»: la «firma de TeamTrack en las variables de nuisance». Era
+    falsa. Se deja tachada en D8.
+  - D7, «límites conocidos»: que el `nuisance` a 8 s al azar fuera «una prueba más débil
+    de que no quedan atajos». No es prueba de nada. Se deja tachada en D7.
+  - `gaps.md` C4, C11 y C15: la misma lectura, corregida allí de forma explícita.
+- **Qué significa.** Que `nuisance` salga al azar con estos controles no demuestra que no
+  queden atajos: lo que demuestra es que los controles fijan N, fps, duración y escala,
+  cosa que ya se sabe por construcción. Sigue siendo útil como comprobación del CV: un
+  clasificador sin información tiene que salir al azar, y si no saliera habría un
+  problema de folds (como en C3). Donde sí se busca una firma de la fuente es con
+  variables de movimiento, dentro de un mismo deporte (D17) y entre fuentes (C4).
+
+### D12 (2026-09-28). Regla de fallo sistémico por celda
+
+- **Qué cambia.** `report` calcula, por celda, la proporción de errores no recuperados
+  sobre sus filas **presentes**, sumando todas sus réplicas. Las filas que faltan no
+  cuentan como error (D4).
+  - **Más de un 50 %**: la celda sale de todos los contrastes primarios y secundarios en
+    los que participa, y por tanto de la familia de Holm. Su fila sigue en la tabla con
+    «cell excluded: systemic failure (k/n errors)» y en `excluded_cells` del JSON.
+  - **Entre un 2 % y un 50 %**: la celda sigue, sus errores cuentan como fallo, y se marca
+    ella y sus contrastes (`!` y `flagged_cells`).
+  - `scripts/run_plan.py check` nombra las celdas de más del 50 % en el resumen del
+    lanzador.
+- **Por qué.** El pre-registro solo excluía un modelo con **todas** sus filas en error
+  (D4). Una celda con, por ejemplo, un 90 % de negativas por filtro de contenido metería en
+  Holm un contraste que mide el filtro, no al modelo. Es la misma regla que D4, celda a
+  celda.
+- **Consecuencia para la sección 6.** Los 4 contrastes primarios usan `motion/sheet`
+  neutro. Si esa celda se excluye, el modelo se queda sin contrastes primarios, la familia
+  pierde 4, y en la sección 6 el modelo queda como «sin evidencia», diciendo que fue
+  porque no se pudo medir. Cambia un test de D4: un modelo con una sola celda entera en
+  error ya no aporta el `order` de esa celda a la familia.
+
+### D13 (2026-09-28). El preflight fija los valores exactos
+
+- **Qué cambia.** `run_plan.py preflight` exige `n_frames == 20`, `smooth == 2.0`,
+  `max_speed_ms == 12.0`, `candidates` igual a los 4 deportes, y que cada representación
+  planificada (`sheet`, `text`, `trails`, y `video` si hay un Gemini en el plan) tenga
+  todas las condiciones que `pipeline.VALID` admite en ella. `preflight-a7b` exige
+  `smooth == 2.0` y `max_speed_ms == 12.0`. Se rechazan los booleanos (`True == 1` en
+  Python). Hay un test de mutación por cada valor fijado, por los candidatos y por las
+  celdas que faltan.
+- **Por qué.** D5 comprobaba que `max_speed_ms` estuviera fijado, pero no su valor. El
+  preflight principal miraba el nombre del preset, pero no el suavizado, la ventana, los
+  candidatos ni las celdas. Un conjunto preparado con `--n-frames 40`, otro techo o un
+  preset editado habría pasado.
+
+### D14 (2026-09-28). Lanzador: abortar sin llamar y A7b al final
+
+- **Qué cambia.** `scripts/final_run.sh` corre con `set -euo pipefail`. Si `write_plan`
+  falla, imprime «write_plan failed: no model was called» y sale con 1. Dentro de cada
+  modelo (`set +e` en su subshell), una celda que falla no para las siguientes. Orden por
+  modelo: las 5 celdas primarias; luego `kinematics`, `kinematics_solo`, `trails`, vídeo
+  (Gemini) y réplicas; y **A7b al final**. `scripts/estimate_run.py` sigue el mismo
+  orden. Los tests ejecutan una copia del script con `python` y `motion-sport` falsos y
+  `HOME` redirigido, sin leer claves. El script anterior falla 4 de ellos.
+- **Por qué.** D7 ponía A7b «justo después de sus celdas primarias», delante de las
+  secundarias pre-registradas. Si la corrida se cortaba, lo que se perdía era
+  pre-registrado y lo que quedaba, exploratorio. Y un fallo al escribir el plan no
+  paraba el lanzador.
+
+### D15 (2026-09-28). Informe exploratorio para A7b
+
+- **Qué cambia.** `motion-sport report --exploratory`, o `"exploratory": true` en
+  `plan.json` (`pipeline.is_exploratory`), no calcula contrastes primarios ni Holm. Todo
+  sale en «exploratory contrasts (not pre-registered; raw p)», sin `p_holm` y sin
+  asteriscos, y `order` conserva su nombre. `run_plan.py write --exploratory` pone la
+  marca, que sobrevive a los relanzamientos. `final_run.sh` la pone en `runs/final-d8` y
+  `primary_view.py` la pasa a la vista. La sección 5 añade `--exploratory` al comando de
+  A7b.
+- **Por qué.** D7 aceptaba que el informe de A7b sacara `order` como «primario» con un Holm
+  propio, y confiaba en que se leyera bien. Así ya no hay nada que malinterpretar.
+
+### D16 (2026-09-28). NFL: la fase aleatoria empieza a 1,0 s del snap
+
+- **Qué cambia.** Los clips NFL se reingestan con `--nfl-min-after-snap 1.0` en vez de 0,5
+  (`data/clips_nflrand10`, `runs/ingest_nflrand10.log`). Lo demás de D1 se mantiene.
+- **Por qué.** D1 dejó como limitación que los clips seguían pegados al arranque de la
+  jugada. Para medirlo: por clip, velocidad media de los jugadores en los 5 primeros pasos
+  dividida por la de los 5 últimos, con los mismos controles. Menos de 1 = el clip
+  acelera. Media geométrica [IC 95 % bootstrap por partido]:
+  - NFL a 0,5 s, todos los clips del pool: **0,866** [0,850; 0,882], mediana 0,859. Por
+    desfase: < 1,0 s 0,833; 1,0-2,0 s 0,948; ≥ 2,0 s 0,849.
+  - Las otras fuentes, en el conjunto anterior: 0,93-1,04.
+
+  A 0,5 s la NFL estaba por debajo de todas las demás fuentes: una firma de fase de
+  jugada que ningún otro deporte tiene.
+- **Regla fijada antes del ingest.** Adoptar 1,0 s si da **al menos 400 clips de al menos
+  80 partidos**; si no, quedarse en 0,5 s y documentarlo como limitación. Resultado:
+  **1.125 clips de 122 partidos**. Se adopta 1,0 s.
+
+  | | 0,5 s (`clips_nflrand`) | 1,0 s (`clips_nflrand10`) |
+  |---|---|---|
+  | Clips / partidos | 1.686 / 122 | 1.125 / 122 |
+  | Clips por partido (mín. / mediana / máx.) | 5 / 13 / 25 | 1 / 9 / 19 |
+  | Desfase: mín., cuartiles, p90, máx. (s) | 0,5; 0,6/0,8/1,3; 2,0; 15,7 | 1,0; 1,1/1,3/1,8; 2,5; 15,7 |
+  | Desfase medio (s) | 1,10 | 1,60 |
+  | Clips a < 1,5 s / < 2,0 s | 80 % / 89 % | 62 % / 80 % |
+
+  Por semana: 127, 141, 159, 149, 165, 131, 134 y 119 clips. Hay 24 jugadas sin snap.
+- **Efecto.** Rampa NFL a 1,0 s: **0,938** [0,916; 0,961], mediana 0,937, en todo el
+  pool. En los 400 de `runs/final`: 0,885 [0,851; 0,919] antes y 0,932 [0,893; 0,974]
+  ahora. En el `runs/final` nuevo, las otras fuentes dan: SportVU 0,936 [0,876; 0,997];
+  EIGD 1,026 [1,003; 1,048]; Metrica 0,965 [0,898; 1,037]; SkillCorner 0,969 [0,917;
+  1,030]; TeamTrack 0,850 / 0,963 / 0,997 en baloncesto, balonmano y fútbol (un partido
+  cada uno, sin IC).
+- **Límite que queda.** A 1,0 s la rampa NFL se solapa con la de SportVU, pero sigue por
+  debajo de la del balonmano y el fútbol. La explosión del snap ya no está en casi todos
+  los clips, pero los clips siguen en la primera parte de la jugada (mediana 1,3 s tras
+  el snap), porque en BDB 2023 las jugadas son cortas. Es una restricción de la fuente
+  (A12) y el corte por desfase de la sección 7 lo sigue mostrando.
+- **Coste conocido.** 561 clips NFL menos y menos clips por partido (mediana 9). Siguen
+  sobrando para 400 clips de 122 partidos.
+
+### D17 (2026-09-28). Conjuntos reconstruidos; especialistas; test de fuga por fuente
+
+- **Qué cambia.**
+  - `runs/final` pasa a `runs/final-v2` y `runs/final-d8` a `runs/final-d8-v1`. Ningún
+    modelo respondió sobre ellos.
+  - `data/pool_final3` (37.052 clips) es `pool_final2` sin sus 1.686 clips NFL, con los
+    1.125 a 1,0 s (D16) y con los 390 clips de fútbol de TeamTrack apuntando a los
+    reetiquetados (D10). `data/pool_d8_final3` es el pool de 8 s con el mismo
+    reetiquetado.
+  - `runs/final` y `runs/final-d8` se preparan de nuevo con los mismos parámetros. Las
+    cifras de la sección 3 son las nuevas, y los dos preflights (con los valores de D13)
+    pasan.
+- **Todos los deportes cambian de muestra, no solo la NFL.** `balanced_sample` usa un
+  solo generador aleatorio para todos los deportes y saca primero el fútbol americano.
+  Al cambiar el pool NFL y fusionar el fútbol de TeamTrack, cambia el sorteo de todos.
+  Solapamiento con `runs/final-v2`:
+
+  | Deporte | Todos los clips | 400 primeros |
+  |---|---|---|
+  | Fútbol americano | 113/400 | 20/100 |
+  | Baloncesto | 5/397 | 1/100 |
+  | Balonmano | 86/397 | 21/100 |
+  | Fútbol | 19/337 | 3/100 |
+
+  En `runs/final-d8` el baloncesto y el balonmano son idénticos a los de v1 (el pool de 8
+  s no tiene NFL). Del fútbol, 88 de los 100 de los 300 primeros son los mismos. Es otra
+  muestra de la misma población, sorteada antes de cualquier dato de modelo: no se elige
+  a la vista de nada.
+- **Especialistas sobre `runs/final`** (azar 0,25; CV agrupada por partido;
+  `runs/final/report_specialists.txt` y `specialists_breakdown.txt`):
+
+  | Especialista | 1.531 clips | 400 primeros |
+  |---|---|---|
+  | MiniRocket `motion` | 0,84 [0,82; 0,86] | 0,85 [0,81; 0,88] |
+  | MiniRocket `motion_shuffled` | 0,72 | 0,74 |
+  | MiniRocket `kinematics` | 0,76 | 0,76 |
+  | MiniRocket `kinematics_solo` | 0,70 | 0,69 |
+  | DeepSets `motion` | 0,80 | 0,79 |
+  | DeepSets `formation` | 0,54 | 0,51 |
+  | Baseline cinemático | 0,67 | 0,67 |
+  | Baseline `tempo` | 0,50 | 0,50 |
+  | Baseline `nuisance` (degenerado, D11) | 0,25 [0,18; 0,31], kappa 0,00 | 0,24 |
+
+  - Recall de MiniRocket `motion` por deporte: fútbol americano 0,92, baloncesto 0,82,
+    balonmano 0,79 y fútbol 0,83. El baseline cinemático sigue acertando el fútbol
+    americano (0,91).
+  - Por fuente: EIGD 0,81, Metrica 0,82, NFL 0,92, SkillCorner 0,84, SportVU 0,82, y en
+    TeamTrack 0,67 (baloncesto), 0,67 (balonmano) y 0,74 (fútbol).
+  - Contrastes emparejados:
+
+    | Contraste | Todos los clips | 400 primeros |
+    |---|---|---|
+    | MiniRocket `motion − motion_shuffled` | +0,12 [0,10; 0,14] | +0,11 [0,07; 0,15] |
+    | MiniRocket `kinematics − kinematics_solo` | +0,07 [0,04; 0,09] | +0,065 [0,02; 0,11] |
+    | DeepSets `motion − formation` | +0,25 [0,21; 0,31] | +0,28 [0,22; 0,36] |
+
+  - `nuisance` contesta «baloncesto» en 901 de 1.531 clips.
+- **Especialistas sobre `runs/final-d8`** (azar 0,33):
+  - MiniRocket `motion`: 0,88 [0,85; 0,91] en todos los clips y 0,88 en los 300 primeros.
+  - `motion_shuffled`: 0,79 en los dos.
+  - `motion − motion_shuffled`: +0,08 [0,05; 0,11] en todos y +0,09 [0,04; 0,14] en los
+    300 primeros.
+  - `nuisance` 0,35 (degenerado, D11).
+- **Entre fuentes** (fútbol y baloncesto, TeamTrack fuera del entrenamiento;
+  `runs/final3-xs`):
+
+  | | Dentro de las fuentes de entrenamiento | TeamTrack, nunca visto |
+  |---|---|---|
+  | MiniRocket | 0,97 | 0,95 |
+  | Cinemático | 0,73 | 0,73 |
+
+  El JSON es idéntico byte a byte al de `runs/final2-xs`. TeamTrack solo está en test,
+  así que su id de partido no interviene.
+- **Test de fuga nuevo: ¿se reconoce la fuente dentro de un deporte?** (sustituye como
+  evidencia al `nuisance`, D11; `runs/final/source_id.json`).
+  - **Método.** Para cada deporte, las fuentes con al menos 2 partidos. Con CV agrupada
+    por partido, se predice la fuente del clip a partir de:
+    - las 14 variables del baseline cinemático, con una logística balanceada;
+    - las series de `motion`, con MiniRocket y una logística.
+
+    Se mide la exactitud balanceada (azar = 1/nº de fuentes). El IC sale de un bootstrap
+    de partidos estratificado por fuente. El p sale de una permutación exacta de las
+    fuentes entre partidos.
+  - **Solo el fútbol se puede probar**: Metrica (2 partidos, 62 clips) frente a
+    SkillCorner (10 partidos, 248). Los demás deportes tienen una sola fuente con 2
+    partidos o más, y TeamTrack es ahora un partido por deporte.
+
+    | Variables | Exactitud balanceada | Recall Metrica / SkillCorner | p exacto (permutación) |
+    |---|---|---|---|
+    | Cinemáticas | 0,70 [0,66; 0,72] | 0,63 / 0,76 | 0,015 (nulo: media 0,49, p95 0,60) |
+    | Series MiniRocket | 0,69 [0,66; 0,71] | 0,48 / 0,89 | 0,015 (nulo: media 0,47, p95 0,51) |
+
+  - La permutación recorre las 66 formas de asignar 2 de los 12 partidos a Metrica. El
+    valor observado supera a las otras 65, así que p = 1/66, el mínimo que admite el
+    test. Los IC se apoyan en solo 2 partidos de Metrica, por debajo del mínimo del
+    proyecto (5, `evaluate.MIN_MATCHES`): no son fiables.
+  - **Qué muestra.** Dentro del fútbol, las dos familias de variables reconocen la fuente
+    muy por encima del azar. Las variables de movimiento siguen llevando una firma de la
+    fuente. Puede ser el tracker o la competición (ligas y estilos distintos), y este test
+    no los separa.
+  - **Qué no muestra.** No se puede correr donde una fuga importaría más. TeamTrack es la
+    única fuente con varios deportes, pero tiene un partido por deporte, y la NFL tiene
+    una sola fuente. Para TeamTrack, la evidencia relevante sigue siendo el test entre
+    fuentes: 0,95 sobre una fuente nunca vista.
+- **Análisis y scripts.** `ramp.py`, `breakdown.py`, `source_id.py` y `ttseam.py`, con
+  `ramp.json`, están en `runs/analysis-2026-09-28/`.
+
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 
 La semianchura del IC al 95 % de los contrastes primarios fue de 0,04 a 0,10 (EE ≈
@@ -570,7 +865,9 @@ el análisis primario.
 
 ## Anexo B. Coste y tiempo estimados
 
-`scripts/estimate_run.py` con los tokens medidos en `runs/pilot4-strict` (y en
+`scripts/estimate_run.py` (recalculado el 2026-09-28 después de D14 y D17, sin cambios:
+575,95 USD y 12,3 h; el coste depende del número de llamadas y de los tokens del piloto, no
+de qué clips salen), con los tokens medidos en `runs/pilot4-strict` (y en
 `runs/pilot-strict` para Gemini 3.1) y precios de lista: unos **576 USD** en total, 508
 de las celdas pre-registradas y 68 de A7b. Gemini 3.1 se lleva unos 355 (40 de A7b), por
 sus ~5.000 tokens de razonamiento por ítem. Siguen gpt-5.6-sol ~109 (15 de A7b), Opus 5.5
@@ -579,13 +876,17 @@ Unas **12 h** de reloj, marcadas por Gemini (los modelos corren en paralelo). A7
 estima con los tokens de la hoja a 4 s con 4 opciones: la hoja es la misma imagen de 8
 fotogramas y con 3 opciones el prompt es algo más corto, así que la estimación queda un
 poco alta. Los precios son supuestos, no facturas, y no incluyen los reintentos de las
-llamadas con error (`PASSES=2`), que también se facturan.
+llamadas con error (`PASSES=2`), que también se facturan. El orden de las celdas en el
+estimador es el del lanzador (D14): por modelo, las 5 primarias, las secundarias
+pre-registradas y A7b al final.
 
 ## Anexo C. Requisitos antes de lanzar
 
 - `runs/final` construido (con `--reprs sheet,trails,text,video`, que necesita `.[video]`)
-  y el preflight en verde. Lo está desde el 2026-09-28 (D8).
-- `runs/final-d8` construido y `preflight-a7b` en verde. También lo está.
+  y el preflight en verde, con los valores fijados de D13. Lo está desde el 2026-09-28
+  (reconstruido en D17 desde `data/pool_final3`).
+- `runs/final-d8` construido y `preflight-a7b` en verde. También lo está (D17, desde
+  `data/pool_d8_final3`), y el lanzador marca su `plan.json` como exploratorio (D15).
 - Opus 5.5 habilitado en el Model Garden de Vertex (hueco A6; lo hace Javier). Si no lo
   está, `report` lo saca de los contrastes y de la familia (D4).
 - `gcloud` autenticado. Claves de Azure y OpenRouter en sus ficheros, que el
