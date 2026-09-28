@@ -395,7 +395,7 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `78f144d` (datos: `runs/ingest_nflrand10.log`) |
 | D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
 | D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4`, `381d14e` |
-| D19 | Dos pistas a ≤ 5 cm en toda la ventana son un jugador con dos identificadores (`drop_duplicates`); un tramo exactamente recto de ≥ 4 s es interpolado, faltante (`drop_linear`); conjuntos reconstruidos | el modelo veía 9 jugadores dibujados como 10, y en TeamTrack pistas interpoladas como jugadores | verificador: SportVU 0021500368 segmento 12, posición 389 de los 400; par real más cercano en 4 s a 0,31 m (NFL 0,53 m); 0 de 434.859 pistas de otras fuentes rectas 4 s, 94 de TeamTrack | `f42e8ea`, `3a80332` y el commit de este texto |
+| D19 | Dos pistas a ≤ 5 cm en toda la ventana son un jugador con dos identificadores (`drop_duplicates`); un tramo exactamente recto de ≥ 4 s es interpolado, faltante (`drop_linear`); conjuntos reconstruidos | el modelo veía 9 jugadores dibujados como 10, y en TeamTrack pistas interpoladas como jugadores | verificador: SportVU 0021500368 segmento 12, posición 389 de los 400; par real más cercano en 4 s a 0,31 m (NFL 0,53 m); 0 de 434.859 pistas de otras fuentes rectas 4 s, 94 de TeamTrack | `f42e8ea`, `3a80332`, `20f421e` |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
@@ -1212,7 +1212,7 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
   - Los tramos rectos más cortos siguen dentro, igual que las retenciones parciales
     (notas en D18). `drop_frozen` es el caso de velocidad cero en la ventana entera y
     sigue contándose aparte.
-- **Qué cambia** (`f42e8ea`; scripts de análisis en `3a80332`):
+- **Qué cambia** (`f42e8ea`; scripts de análisis en `3a80332`; este texto en `20f421e`):
   - `ControlConfig.drop_linear` y `drop_duplicates`, activos en todos los presets, con
     `linear_min_s = 4.0` y `duplicate_tol_m = 0.05`. Después de `drop_frozen` y antes de
     elegir los 10 se quitan primero los tramos rectos y luego las copias (se conserva la de
