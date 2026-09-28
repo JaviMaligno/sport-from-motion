@@ -20,11 +20,12 @@ def _script(name: str):
     return mod
 
 
-def test_teamtrack_handball_halves_are_one_match():
+def test_teamtrack_one_match_per_sport():
     tt = _script("teamtrack_to_long_csv")
     assert tt.match_id("Handball", "1st_fisheye_0-30") == "tt-handball"
     assert tt.match_id("Handball", "2nd_fisheye_660-690") == "tt-handball"
-    assert tt.match_id("Soccer", "F_20200220_1_0000_0030") == "20200220"
+    assert tt.match_id("Soccer", "F_20200220_1_0000_0030") == "tt-soccer"
+    assert tt.match_id("Soccer", "F_20220220_1_0900_0930") == "tt-soccer"  # same recording
     assert tt.match_id("Basketball", "P3_0-30") == "P3"
 
 

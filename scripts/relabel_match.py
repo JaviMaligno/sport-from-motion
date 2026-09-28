@@ -1,13 +1,16 @@
 """Rewrite the match id of already-ingested clips, without re-downloading the source.
 
-Used for TeamTrack handball: clips ingested before scripts/teamtrack_to_long_csv.py
-grouped both halves as one game carry the half ("1st" / "2nd") as match_id, which
-makes one game look like two independent matches to the grouped CV and the cluster
-bootstrap. Clip ids (and so every seed derived from them) are left unchanged.
+Used for TeamTrack: clips ingested before scripts/teamtrack_to_long_csv.py grouped
+each sport as one recording carry the handball half ("1st" / "2nd") or the soccer file
+date ("20200220" / "20220220", one continuous recording with a date typo) as match_id,
+which makes one game look like two independent matches to the grouped CV and the
+cluster bootstrap. Clip ids (and so every seed derived from them) are left unchanged.
 
     # symlink copy of data/clips first: never relabel data/clips itself
     python scripts/relabel_match.py data/clips_tt_regroup --match tt-handball \
         --glob 'teamtrack-1st-*' --glob 'teamtrack-2nd-*' --sport handball
+    python scripts/relabel_match.py data/clips_tt_regroup --match tt-soccer \
+        --glob 'teamtrack-20200220-*' --glob 'teamtrack-20220220-*' --sport soccer
 
 Each matching `.npz` is rewritten through a temporary file and `os.replace`, so a
 symlink is *replaced* by a real file and its target (the original clip in data/clips)

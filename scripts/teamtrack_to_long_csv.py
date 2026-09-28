@@ -4,11 +4,17 @@
 rows x (2 * n_players) columns, pitch coordinates in metres, consecutive windows
 shifted by 12 rows with a stable player order. Each 30 s segment is rebuilt by
 downloading only the windows needed to cover it (0, 20, 40, ... and the last one),
-not all ~56. Match ids: soccer F_<date>; handball `tt-handball` (both halves are the
-same game, so they are one match for the grouped CV and the cluster bootstrap; the half
-stays in the segment, e.g. train-1st_fisheye_0-30); basketball P3 (one match).
-Clips ingested before this change used the half as match id: fix them without
-re-downloading with scripts/relabel_match.py.
+not all ~56. Match ids: soccer `tt-soccer`; handball `tt-handball`; basketball P3.
+Each sport is one recording, so it is one match for the grouped CV and the cluster
+bootstrap; the part stays in the segment (e.g. train-1st_fisheye_0-30,
+train-F_20200220_1_0000_0030).
+- Handball: both halves are the same game.
+- Soccer: F_20200220_1 (0-900 s) and F_20220220_1 (900-1980 s) are one continuous
+  recording; the second date is a typo in the dataset. At the 900 s seam the same 22
+  track indices are a median 0.6 m from where the first file left them, closer than
+  between two segments of the same file (~4 m). Clips ingested before used the date as
+  match id and counted the game as two.
+Fix already-ingested clips without re-downloading with scripts/relabel_match.py.
 
     python scripts/teamtrack_to_long_csv.py <file_list.txt> data/raw/teamtrack
     -> data/raw/teamtrack/{soccer,handball,basketball}.csv
@@ -29,12 +35,15 @@ SPORT = {"Soccer": "soccer", "Handball": "handball", "Basketball": "basketball"}
 
 
 HANDBALL_MATCH = "tt-handball"  # the one TeamTrack handball game, both halves
+# The one TeamTrack soccer recording: F_20200220_1 and F_20220220_1 are its first 900 s and
+# the rest (date typo), not two games.
+SOCCER_MATCH = "tt-soccer"
 
 
 def match_id(sport: str, seg: str) -> str:
     """Match id of a TeamTrack segment (`seg` = file stem without the window index)."""
     if sport == "Soccer":
-        return seg.split("_")[1]
+        return SOCCER_MATCH  # the date in F_<date>_1 is not a match (see module docstring)
     if sport == "Handball":
         return HANDBALL_MATCH  # the half ("1st"/"2nd", seg.split("_")[0]) is not a match
     return seg.split("_")[0]
