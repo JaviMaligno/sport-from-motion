@@ -350,13 +350,13 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D8 | Conjunto reconstruido con N = 10 al azar; secciones 3, 4, 7, 8 y 10 al día | la selección central quitaba señal de forma desigual (A8) y la sección 3 no describía las fuentes reales | A8 (C10); especialistas sobre el conjunto nuevo | `75feb4e` |
 | D9 | Corregida la frase sobre la resolución del bootstrap | era falsa | 2/2.001 ≈ 0,001 < 0,0025 | `75feb4e` |
 | D10 | El fútbol de TeamTrack es un partido (`tt-soccer`) | sus dos ficheros son una grabación continua con la fecha mal escrita | verificador; costura de 900 s: mismas 22 pistas a 0,61 m de mediana | `eec85c4` |
-| D11 | Corrección: el baseline `nuisance` es degenerado y no es evidencia; se retira la «firma de TeamTrack» de D7 y D8 | tras los controles sus 4 variables son constantes | `baselines.nuisance_features`; spread = 1 ± ruido de float32 | `DOCS_COMMIT` |
+| D11 | Corrección: el baseline `nuisance` es degenerado y no es evidencia; se retira la «firma de TeamTrack» de D7 y D8 | tras los controles sus 4 variables son constantes | `baselines.nuisance_features`; spread = 1 ± ruido de float32 | `78f144d` |
 | D12 | Regla de fallo sistémico por celda (> 50 % de errores) | una celda caída no mide al modelo y metería un contraste falso en Holm | tests de `report` | `5cddffe` |
 | D13 | El preflight fija fotogramas, suavizado, techo, candidatos y celdas | que un conjunto mal construido no pase | tests de mutación | `a62d4e4` |
 | D14 | Lanzador: aborta si falla la contabilidad; A7b al final | una celda exploratoria no debe ir antes que las secundarias pre-registradas, y un `plan.json` fallido no puede dejar llamar | tests del lanzador con `python` falso; el script viejo falla 4 | `c6b355d` |
 | D15 | Informe exploratorio para A7b (sin Holm) | en D7 `order` salía como primario con Holm propio | tests de `report` | `95de80b` |
-| D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `DOCS_COMMIT` (datos: `runs/ingest_nflrand10.log`) |
-| D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `DOCS_COMMIT` |
+| D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `78f144d` (datos: `runs/ingest_nflrand10.log`) |
+| D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
