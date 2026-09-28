@@ -303,3 +303,34 @@ bash scripts/final_run.sh               # la corrida (reanudable)
 - **Coste conocido.** Un grupo menos de balonmano: IC algo más anchos en los cortes por
   deporte.
 
+### D4 (2026-09-28). Robustez del informe y de la vista primaria
+
+No cambia ningún contraste ni el estadístico. Cierra tres casos que el pre-registro no
+resolvía de forma mecánica:
+
+- **Modelo que no corre.** Si **todas** las filas de un modelo son errores no recuperados
+  (p. ej. Opus 5.5 sin habilitar en Vertex), `report` lo saca de todos los contrastes y de la
+  familia de Holm, e imprime una nota (`excluded_models` en el JSON). Es lo que ya decía la
+  sección 5 («la familia es la que exista»); antes habría entrado con contrastes 0 − 0. Sus
+  celdas siguen en la tabla. Un modelo con alguna celda que funciona no se excluye: sus
+  errores cuentan como fallo (sección 8).
+- **Filas que faltan.** Se elige un **plan explícito**: `final_run.sh` escribe
+  `runs/final/plan.json` = `{"cells": {<fichero de predicciones>: filas planificadas}}`,
+  sacado de sus propios comandos (`--limit`), con `scripts/run_plan.py write`. Se descarta
+  la alternativa de guardar el `--limit` en cada registro de predicción, porque no detecta
+  una celda que nunca arrancó (sin fichero no hay registros). El resumen de errores del
+  lanzador (`scripts/run_plan.py check`) y `report` (`incomplete`) marcan las celdas con
+  menos filas que las planificadas, y las que superan el 2 % de errores sobre lo
+  planificado. Un relanzamiento con `MODELS=<uno>` fusiona su plan con el existente.
+- **Especialistas comparables por clip.** `scripts/primary_view.py --clips-from-models`
+  restringe los especialistas de la vista a los clips que se preguntaron a los modelos
+  (unión de sus ficheros; avisa si no coinciden). Así, una comparación por clip entre un
+  especialista y un modelo va sobre los mismos clips. La vista recibe además un
+  `plan.json` filtrado (réplica 1 de los modelos pre-registrados). Los especialistas no
+  entran en los contrastes primarios (sección 7), así que esto no toca la familia.
+
+```bash
+.venv/bin/python scripts/primary_view.py runs/final runs/final-primary --clips-from-models
+.venv/bin/python scripts/run_plan.py check runs/final
+```
+

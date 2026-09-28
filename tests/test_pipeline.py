@@ -314,3 +314,62 @@ def test_prepare_reports_rejections_per_sport_and_source(tmp_path, capsys):
     hi = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "hi"), conditions=["motion"],
                           reprs=["text"], n_players=10, max_speed_ms=200.0)
     assert json.loads((hi / "config.json").read_text())["n_clips_kept"] == 20
+
+
+def _boom(model_id, req):
+    raise chat.BackendError("HTTP 404: model not enabled")
+
+
+PRIMARY_CELLS = (("motion", "sheet"), ("motion_shuffled", "sheet"), ("formation", "sheet"),
+                 ("motion", "text"))
+
+
+def test_all_error_model_is_out_of_the_contrasts_and_the_holm_family(prepared, capsys):
+    from motion_sport import cli
+
+    for cond, rep in PRIMARY_CELLS:
+        pipeline.run_model(str(prepared), "fake:ok", condition=cond, rep=rep, complete=_coin(5))
+        pipeline.run_model(str(prepared), "fake:dead", condition=cond, rep=rep, complete=_boom)
+    # a model with one working cell is not excluded: its errors count as failures
+    pipeline.run_model(str(prepared), "fake:half", condition="motion", rep="sheet", complete=_coin(6))
+    pipeline.run_model(str(prepared), "fake:half", condition="motion_shuffled", rep="sheet",
+                       complete=_boom)
+    rep = pipeline.report(str(prepared), n_boot=50)
+    assert [e["model"] for e in rep["excluded_models"]] == ["fake:dead"]
+    assert not any(c["model"] == "fake:dead" for c in rep["contrasts"])
+    assert rep["holm"]["family_size"] == 3 + 1  # fake:ok (order, shape, text) + fake:half (order)
+    assert any(r["model"] == "fake:dead" for r in rep["runs"].values())  # still in the table
+    cli.main(["report", "--items", str(prepared), "--n-boot", "20"])
+    assert "NOTE: fake:dead excluded from every contrast and from the Holm family" in \
+        capsys.readouterr().out
+
+
+def test_plan_json_flags_missing_rows_and_error_heavy_cells(prepared, capsys):
+    from motion_sport import cli
+
+    pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", complete=_coin(1),
+                       limit=10)
+    pipeline.run_model(str(prepared), "fake:m", condition="formation", rep="sheet", complete=_boom,
+                       limit=24)
+    pipeline.run_model(str(prepared), "fake:m", condition="motion_shuffled", rep="sheet",
+                       complete=_coin(2), limit=24)
+    (prepared / "plan.json").write_text(json.dumps({"cells": {
+        "fake__m__motion__sheet": 24, "fake__m__formation__sheet": 24,
+        "fake__m__motion_shuffled__sheet": 24, "fake__m__motion__text": 24}}))
+    st = {s["file"]: s for s in pipeline.plan_status(prepared)}
+    assert st["fake__m__motion__sheet"] == {"file": "fake__m__motion__sheet", "planned": 24,
+                                            "rows": 10, "errors": 0, "missing": 14, "flagged": True}
+    assert st["fake__m__motion__text"]["rows"] == 0 and st["fake__m__motion__text"]["missing"] == 24
+    assert st["fake__m__formation__sheet"]["missing"] == 0 and st["fake__m__formation__sheet"]["flagged"]
+    assert not st["fake__m__motion_shuffled__sheet"]["flagged"]
+    rep = pipeline.report(str(prepared), n_boot=20, tag="nonexistent-tag")  # tag-independent
+    assert {c["file"] for c in rep["incomplete"]} == {
+        "fake__m__motion__sheet", "fake__m__formation__sheet", "fake__m__motion__text"}
+    cli.main(["report", "--items", str(prepared), "--n-boot", "20"])
+    assert "fake__m__motion__sheet: 10/24 rows (14 missing)" in capsys.readouterr().out
+
+
+def test_no_plan_json_no_incomplete(prepared):
+    pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", complete=_coin(1),
+                       limit=5)
+    assert pipeline.plan_status(prepared) == [] and pipeline.report(str(prepared), n_boot=20)["incomplete"] == []

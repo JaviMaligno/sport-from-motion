@@ -239,6 +239,14 @@ def _report(a) -> None:
         ig = rep["ignored"]
         print(f"\nignored {ig['rows_not_in_items']} prediction rows of clips not in the current "
               f"items ({len(ig['files'])} files)")
+    for e in rep.get("excluded_models", []):
+        print(f"\nNOTE: {e['model']} excluded from every contrast and from the Holm family: "
+              f"{e['reason']} ({e['n_rows']} rows)")
+    if rep.get("incomplete"):
+        print("\nplanned cells (plan.json) with missing rows or > 2 % unrecovered errors:")
+        for c in rep["incomplete"]:
+            print(f"  {c['file']}: {c['rows']}/{c['planned']} rows ({c['missing']} missing), "
+                  f"{c['errors']} unrecovered errors")
     if rep.get("primary_contrasts"):
         h = rep["holm"]
         print(f"\nprimary contrasts (pre-registered; Holm across all {h['family_size']} in this "

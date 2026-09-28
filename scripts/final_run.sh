@@ -5,7 +5,8 @@
 # One background subshell per model; cells in pre-registered order, primary first.
 # Resumable: re-running skips answered items and retries errored / unparseable ones
 # (every cell is run PASSES times; later passes only redo what failed).
-# Logs in $ITEMS/logs/<model>.log; an error summary per file at the end.
+# Logs in $ITEMS/logs/<model>.log; $ITEMS/plan.json holds the planned rows per prediction
+# file (report and the error summary flag cells with missing rows); an error summary at the end.
 #
 #   DRY_RUN=1 bash scripts/final_run.sh        # print the commands, touch nothing
 #   bash scripts/final_run.sh                  # the run
@@ -87,16 +88,12 @@ print(f"preflight ok: {root} ({cfg['preset']}, {cfg['clips_kept_by_sport']})")
 EOF
 }
 
-error_summary() {  # rows still errored after every pass; > 2 % of a cell is flagged
-  .venv/bin/python - "$ITEMS" <<'EOF'
-import json, pathlib, sys
-for p in sorted((pathlib.Path(sys.argv[1]) / "predictions").glob("*.jsonl")):
-    rows = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
-    err = sum(bool(r.get("error")) and not r.get("label") for r in rows)
-    if rows and err:
-        flag = "  > 2 %: REPORT AS SUCH" if err > 0.02 * len(rows) else ""
-        print(f"{p.name}: {err}/{len(rows)} unrecovered errors ({err / len(rows):.1%}){flag}")
-EOF
+error_summary() {  # unrecovered errors per file (> 2 % flagged) + planned cells with missing rows
+  .venv/bin/python scripts/run_plan.py check "$ITEMS"
+}
+
+write_plan() {  # $ITEMS/plan.json: planned rows per prediction file, from these very commands
+  for m in $MODELS; do commands_for "$m"; done | .venv/bin/python scripts/run_plan.py write "$ITEMS"
 }
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -110,6 +107,7 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 preflight
+write_plan
 mkdir -p "$ITEMS/logs"
 for m in $MODELS; do
   (

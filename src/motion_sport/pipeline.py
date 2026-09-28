@@ -507,6 +507,45 @@ def _contrast_pairs(cells: dict) -> list[tuple[CellKey, CellKey]]:
     return [(a, b) for a, b in pairs if a in cells and b in cells]
 
 
+ERROR_FLAG_SHARE = 0.02  # pre-registration section 8: > 2 % unrecovered errors is flagged
+
+
+def _unrecovered(r: dict) -> bool:
+    return bool(r.get("error")) and not r.get("label")
+
+
+def plan_status(items_dir: str | pathlib.Path) -> list[dict]:
+    """Planned cells vs what is on disk, from `<items>/plan.json` (written by
+    scripts/final_run.sh): {"cells": {<prediction file stem>: planned rows}}.
+
+    One entry per planned cell: rows present (distinct items of clips still in the
+    items), unrecovered errors, missing rows and whether the cell is flagged (missing
+    rows, or errors > ERROR_FLAG_SHARE of the plan). [] without a plan.json.
+    """
+    root = pathlib.Path(items_dir)
+    plan_path = root / "plan.json"
+    if not plan_path.exists():
+        return []
+    plan = json.loads(plan_path.read_text())["cells"]
+    known = {i["clip_id"] for i in load_items(root)} if (root / "items.jsonl").exists() else None
+    out = []
+    for stem, planned in sorted(plan.items()):
+        path = root / "predictions" / f"{stem}.jsonl"
+        rows = {}
+        if path.exists():
+            for line in path.read_text().splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    if known is None or r.get("clip_id") in known:
+                        rows[r["item_id"]] = r
+        errors = sum(_unrecovered(r) for r in rows.values())
+        missing = max(0, int(planned) - len(rows))
+        out.append({"file": stem, "planned": int(planned), "rows": len(rows), "errors": errors,
+                    "missing": missing,
+                    "flagged": bool(missing) or errors > ERROR_FLAG_SHARE * int(planned)})
+    return out
+
+
 def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
     """Summaries for every prediction file, replicate groups and paired contrasts.
 
@@ -549,9 +588,20 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
         replicates.append({"model": model, "cell": _cell_label(cond, rep, style),
                            "condition": cond, "repr": rep, "prompt_style": style,
                            "replicates": sorted(by_rep), **summ})
+    # A model whose every row is an unrecovered error (e.g. not enabled on the route)
+    # did not run: its contrasts would be 0 - 0 and would only dilute the Holm family
+    # (pre-registration section 5: "the family is the one that exists").
+    rows_of: dict[str, list[dict]] = defaultdict(list)
+    for v in runs.values():
+        rows_of[v["meta"]["model"]] += v["rows"]
+    excluded = [{"model": m, "n_rows": len(rs), "reason": "every row is an unrecovered error"}
+                for m, rs in sorted(rows_of.items()) if rs and all(_unrecovered(r) for r in rs)]
+    out_models = {e["model"] for e in excluded}
     primary_of = {spec: name for name, spec in PRIMARY_CONTRASTS.items()}
     contrasts = []
     for a, b in _contrast_pairs(cells):
+        if a[0] in out_models:
+            continue
         name = primary_of.get((a[1:], b[1:]))
         contrasts.append({"model": a[0], "a": _cell_label(*a[1:]), "b": _cell_label(*b[1:]),
                           "primary": name is not None, "contrast": name,
@@ -566,4 +616,7 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
             "primary_contrasts": primary,
             "secondary_contrasts": [c for c in contrasts if not c["primary"]],
             "holm": {"family_size": sum(c["p"] == c["p"] for c in primary), "alpha": ALPHA},
+            "excluded_models": excluded,
+            # planned cells (plan.json) with missing rows or > 2 % errors; tag-independent
+            "incomplete": [c for c in plan_status(root) if c["flagged"]],
             "ignored": ignored}
