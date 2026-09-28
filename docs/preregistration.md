@@ -370,7 +370,7 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D15 | Informe exploratorio para A7b (sin Holm) | en D7 `order` salía como primario con Holm propio | tests de `report` | `95de80b` |
 | D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `78f144d` (datos: `runs/ingest_nflrand10.log`) |
 | D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
-| D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4` (docs: este commit) |
+| D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4`, `381d14e` |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
