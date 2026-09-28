@@ -56,8 +56,8 @@ quede al azar (exploratorio).
 
 ## 3. Ítems
 
-- **Conjunto**: `runs/final`, reconstruido por segunda vez el 2026-09-28 desde
-  `data/pool_final3` (37.052 clips; D8 y D17), antes de cualquier llamada a un modelo.
+- **Conjunto**: `runs/final`, reconstruido por tercera vez el 2026-09-28 desde
+  `data/pool_final4` (37.052 clips; D8, D17 y D18), antes de cualquier llamada a un modelo.
   Preset `strict_smooth` (suavizado gaussiano, σ = 2 fotogramas), ventanas de 4 s a 5 Hz
   (20 fotogramas), `--per-sport 400`, las 5 condiciones y las representaciones `sheet`,
   `trails`, `text` y `video`. Además del preset:
@@ -65,6 +65,10 @@ quede al azar (exploratorio).
     --n-players 10`), no los 10 más centrales (hueco A14; D5 y D8).
   - **Techo de velocidad**: se rechaza el clip si algún jugador conservado da un paso de
     más de 12 m/s (`max_speed_ms`; D2).
+  - **Pistas congeladas**: una pista cuya posición es exactamente constante en toda la
+    ventana no es un jugador (un valor retenido o de relleno) y se descarta antes de
+    elegir los 10 (`drop_frozen`; D18). En TeamTrack, un jugador no detectado viene como
+    (0, 0) exacto y se lee como no observado (D18).
   - **Fútbol americano**: un clip por jugada, que empieza en una fase **aleatoria** entre
     **1,0 s** después del snap y el final de la jugada menos 4 s (D1 y D16).
   - **Balonmano**: 6 partidos. Las dos partes del partido de TeamTrack forman un solo
@@ -80,13 +84,18 @@ quede al azar (exploratorio).
   |---|---|---|---|
   | Fútbol americano | NFL Big Data Bowl 2023, semanas 1-8, fase aleatoria desde 1,0 s tras el snap (D1, D16) | 400 | 122 |
   | Baloncesto | NBA SportVU 2015-16 (385) + TeamTrack (12) | 397 | 31 + 1 |
-  | Balonmano | EIGD-H, 5 partidos de la HBL medidos con Kinexon (334) + TeamTrack (63) | 397 | 5 + 1 |
+  | Balonmano | EIGD-H, 5 partidos de la HBL medidos con Kinexon (332) + TeamTrack (66) | 398 | 5 + 1 |
   | Fútbol | SkillCorner Open Data, solo posiciones detectadas (248) + Metrica (62) + TeamTrack (27) | 337 | 10 + 2 + 1 |
 
-  De 1.600 clips de entrada (400 por deporte) se conservan 1.531, de 173 partidos.
+  De 1.600 clips de entrada (400 por deporte) se conservan 1.532, de 173 partidos.
   Rechazos: SkillCorner 60 de 308 por número de jugadores (19 %, el único aviso de
-  `prepare`), TeamTrack 6 de 108 por teletransporte, SportVU 2 por teletransporte y 1 por
-  jugadores. `prepare` tardó 26 minutos (`runs/prepare_final3.log`).
+  `prepare`); TeamTrack 3 de 108 (2 por teletransporte y 1 por jugadores); SportVU 2 por
+  teletransporte y 1 por jugadores; EIGD 2 por jugadores, porque todas sus pistas están
+  congeladas (el arranque congelado de dos secuencias, D18). Pistas congeladas descartadas:
+  28 en esos 2 clips de EIGD y 1 en un clip de TeamTrack, que se conserva con 10 jugadores
+  reales (`frozen_dropped_by_source`). Ningún jugador conservado está quieto ni en (0, 0)
+  (`scripts/analysis/frozen_tracks.py`). `prepare` tardó 21 minutos
+  (`runs/prepare_final4.log`).
 - **Preflight**. El lanzador se niega a arrancar (`scripts/run_plan.py preflight`) si el
   preset no es `strict_smooth`; si en `controls` no están exactamente `player_mode =
   random`, `n_players = 10`, `n_frames = 20`, `smooth = 2.0` y `max_speed_ms = 12.0`; si
@@ -95,7 +104,8 @@ quede al azar (exploratorio).
   prompts informados; si falta una representación planificada, o si en alguna de ellas
   falta una de las 5 condiciones que admite. El de A7b (`preflight-a7b`) fija igual
   `smooth = 2.0` y `max_speed_ms = 12.0`, con `n_frames = 40`. Los valores booleanos no
-  valen como números (D13).
+  valen como números (D13). Los dos exigen además `drop_frozen = True` y rechazan el
+  conjunto si algún jugador conservado no se mueve en ningún fotograma (D18).
 - **Opciones**: las de `config.json` (`candidates`), es decir, los 4 deportes sin
   distractores. Azar = 1/|candidates| = 0,25.
 - **Muestra**: los **400 primeros clips** del orden `interleave` (reparto por
@@ -104,15 +114,18 @@ quede al azar (exploratorio).
   (fútbol americano 100, baloncesto 32, fútbol 13, balonmano 6). Por fuente: NFL 100,
   SportVU 97, EIGD 84, SkillCorner 77, Metrica 15 y TeamTrack 27 (3 de baloncesto, 16 de
   balonmano y 8 de fútbol). Las réplicas 2 y 3 usan los 200 primeros (50 por deporte),
-  que son un subconjunto de los 400.
+  que son un subconjunto de los 400. Son los mismos 400 clips que antes de D18: la
+  corrección solo cambió qué jugadores se ven en 23 clips de balonmano de TeamTrack, 8
+  de ellos entre los 400 (7 tenían un punto quieto).
 - **Celda A7b, clips de 8 s (secundaria y exploratoria; D7)**: `runs/final-d8`, con los
   mismos controles (`strict_smooth`, N = 10 al azar, 12 m/s) pero ventanas de **8 s**
   (`--n-frames 40`) y **3 deportes**: baloncesto, balonmano y fútbol (azar 1/3). No hay
   fútbol americano porque solo 42 clips NFL de mitad de jugada llegan a 8 s. Sale de
-  `data/pool_d8_final3`, que son los clips de 8 s del barrido A7 con el balonmano y el
-  fútbol de TeamTrack reagrupados como en D3 y D10. De 1.200 clips de entrada se
-  conservan 1.063 (baloncesto 387, balonmano 394, fútbol 282; por fuente SportVU 375,
-  EIGD 333, SkillCorner 195, Metrica 60 y TeamTrack 100) de 51 partidos. Muestra: los
+  `data/pool_d8_final4`, que son los clips de 8 s del barrido A7 con el balonmano y el
+  fútbol de TeamTrack reagrupados como en D3 y D10, y con los (0, 0) de TeamTrack como no
+  observados (D18). De 1.200 clips de entrada se conservan 1.065
+  (baloncesto 387, balonmano 397, fútbol 281; por fuente SportVU 375, EIGD 333,
+  SkillCorner 195, Metrica 60 y TeamTrack 102) de 51 partidos. Muestra: los
   **300 primeros** del orden `interleave` (100 por deporte, 51 partidos). Celdas:
   `motion/sheet` y `motion_shuffled/sheet`, con prompt neutro. La hoja sigue teniendo 8
   fotogramas: a 8 s quedan a unos 1,1 s uno de otro (a 4 s, a unos 0,55 s). Tiene su
@@ -325,9 +338,9 @@ la celda afectada y se informan las dos versiones en «Desviaciones».
 
 Todas las de 2026-09-28 son **anteriores a cualquier dato de modelo sobre el dataset
 final**. Cuando se escribieron, ningún modelo había respondido sobre `runs/final` ni
-`runs/final-d8`, ni sobre los conjuntos anteriores (`runs/final-v1`, `runs/final-v2` y
-`runs/final-d8-v1`): los cinco directorios `predictions/` contienen solo especialistas
-(comprobado de nuevo al escribir D10-D17). Los especialistas (MiniRocket, DeepSets y los
+`runs/final-d8`, ni sobre los conjuntos anteriores (`runs/final-v1`, `runs/final-v2`,
+`runs/final-v3`, `runs/final-d8-v1` y `runs/final-d8-v2`): los siete directorios
+`predictions/` contienen solo especialistas (comprobado de nuevo al escribir D10-D18). Los especialistas (MiniRocket, DeepSets y los
 baselines) sí se corrieron, sobre los conjuntos viejos y sobre los nuevos. No son datos de
 modelo en el sentido de este pre-registro (sección 7): sirvieron para encontrar los
 problemas y para comprobar los conjuntos reconstruidos, y sus números están abajo. Las
@@ -357,6 +370,7 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D15 | Informe exploratorio para A7b (sin Holm) | en D7 `order` salía como primario con Holm propio | tests de `report` | `95de80b` |
 | D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `78f144d` (datos: `runs/ingest_nflrand10.log`) |
 | D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
+| D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4` (docs: este commit) |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
@@ -852,7 +866,186 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
     una sola fuente. Para TeamTrack, la evidencia relevante sigue siendo el test entre
     fuentes: 0,95 sobre una fuente nunca vista.
 - **Análisis y scripts.** `ramp.py`, `breakdown.py`, `source_id.py` y `ttseam.py`, con
-  `ramp.json`, están en `runs/analysis-2026-09-28/`.
+  `ramp.json`, están en `runs/analysis-2026-09-28/`. Desde D18 están versionados en
+  `scripts/analysis/` (`faaac76`); `breakdown.py` reproduce byte a byte el
+  `specialists_breakdown.txt` de este conjunto, y `contrasts.py` (`86806f4`) todos los
+  contrastes de arriba.
+- **Actualizado por D18 (2026-09-28).** Este conjunto es ahora `runs/final-v3` (y el de 8
+  s, `runs/final-d8-v2`). Tenía 21 clips con jugadores que no se movían (19 de balonmano
+  de TeamTrack y 2 de EIGD), 7 de ellos entre los 400 primeros. Los números de arriba son
+  los de ese conjunto; los del reconstruido están en D18.
+
+### D18 (2026-09-28). TeamTrack: (0, 0) es un jugador no detectado; las pistas congeladas no son jugadores
+
+- **Qué encontró el verificador.** En los CSV de TeamTrack (`data/raw/teamtrack/*.csv`,
+  de `scripts/teamtrack_to_long_csv.py`), un jugador no detectado viene como (0,0; 0,0)
+  exacto. El pipeline lo leía como una posición real. Una pista pegada a (0, 0) toda la
+  ventana contaba como observada del todo, pasaba el techo de 12 m/s (no se mueve) y se
+  dibujaba como un punto quieto en una esquina (p. ej.
+  `runs/final-v3/render/teamtrack-1st-train-1st_fisheye_480-510-00001/motion_sheet.png`).
+- **Evidencia en los datos crudos.**
+  - Nunca hay una sola coordenada a 0: siempre las dos. Es un código de «falta», no una
+    posición.
+  - Puntos (0, 0): baloncesto 52 de 90.000 filas (1 de 10 segmentos); balonmano 21.139
+    de 799.200 (2,6 %; 25 de 62 segmentos); fútbol 7.665 de 1.073.688 (5 de 66). En 16
+    segmentos de balonmano hay exactamente 900 o 1.800 ceros en 900 fotogramas: en cada
+    fotograma falta uno (o dos) de los 15-16 huecos de jugador, repartido entre dos
+    pistas que se turnan (p. ej. pistas 1 y 6).
+  - En los clips ingeridos (`data/pool_final3`): 160 de los 894 clips de TeamTrack
+    tienen algún (0, 0) (4.560 puntos), y 185 pistas están en (0, 0) todo el clip. En el
+    pool de 8 s, 73 de 408 (4.100 puntos).
+- **Afectados en los conjuntos de D17** (auditoría `scripts/analysis/frozen_tracks.py`:
+  jugadores conservados cuya posición no cambia en ningún fotograma, comprobado sobre
+  los clips controlados y repitiendo con la semilla de `prepare` qué pistas se
+  eligieron; los dos métodos coinciden clip a clip).
+  - `runs/final-v3`: **19 de los 63 clips de balonmano de TeamTrack**. En 17 hay un punto
+    en (0, 0), en 1 hay dos y en 1 hay una pista retenida en un valor distinto de cero.
+    **7 de los 16** clips de balonmano de TeamTrack de los 400 primeros. Además, **2 clips
+    de EIGD con los 10 jugadores quietos** (fuera de los 400; ver abajo). Ninguno en
+    otras fuentes.
+  - `runs/final-d8-v2`: 9 clips (8 de balonmano de TeamTrack y 1 de fútbol de TeamTrack
+    con 4 pistas en (0, 0)), 3 de ellos entre los 300 primeros. El verificador contó 4;
+    aquí cuenta cualquier jugador conservado sin ningún movimiento.
+  - `runs/final3-xs` (entre fuentes): 38 jugadores quietos de Metrica y 15 de TeamTrack.
+  - Con los (0, 0) parciales pasaba otra cosa: un salto a (0, 0) y de vuelta supera los
+    12 m/s y el clip se rechazaba como teletransporte. Por eso TeamTrack perdía 6 clips
+    por teletransporte en D17; ahora pierde 2.
+- **¿Hay pistas congeladas en otras fuentes?** Auditoría de todos los clips de
+  `data/pool_final3` (37.052) y del pool de 8 s:
+
+  | Fuente | Clips | Puntos (0, 0) | Pistas congeladas | Clips con alguna | Clips con todas |
+  |---|---|---|---|---|---|
+  | NFL | 1.125 | 0 | 0 | 0 | 0 |
+  | SportVU | 23.306 | 0 | 0 | 0 | 0 |
+  | SkillCorner | 7.456 | 0 | 0 | 0 | 0 |
+  | Metrica | 2.861 | 0 | 79 | 23 | 0 |
+  | EIGD | 1.410 | 0 | 72 | 5 | 5 |
+  | TeamTrack | 894 | 4.560 | 191 (185 en (0, 0)) | 135 | 0 |
+
+  - **EIGD: artefacto, no parada de juego.** Los 5 clips enteramente quietos son el
+    arranque de 3 de las 25 secuencias de 5 min: los primeros 13,2 s de
+    `48dcd3_00-06-00`, 4,7 s de `e0e547_00-00-00` y 4,6 s de `e8a35a_00-02-00`. En esos
+    tramos están exactamente quietos a la vez todos los jugadores (14-16) y el balón, y
+    empiezan en t = 0. Al acabar, los jugadores se mueven con un paso normal (0,04-0,06 m
+    por fotograma a 30 Hz), sin salto: es el primer dato real copiado hacia atrás, no un
+    tiempo muerto. En el resto de EIGD (5.535 ventanas de 4 s con al menos 10 jugadores
+    observados) **ninguna** tiene una sola pista exactamente quieta. El tramo real más
+    tranquilo (mediana 0,155 m/s, `ad969d_00-00-30` en el segundo 49, probablemente una
+    parada) tiene a todos los jugadores moviéndose al menos 6,5 cm. Un tiempo muerto real
+    tiene ese aspecto, no el de posiciones idénticas al milímetro. Estos 5 clips se
+    quedan fuera (2 estaban en `runs/final-v3`).
+  - **Metrica: artefacto.** Las 79 pistas congeladas son jugadores sueltos quietos entre
+    otros que se mueven (mediana de los demás 0,5-1,4 m/s), a menudo en la misma posición
+    en clips seguidos (hasta 24 s). Ninguna llegaba a `runs/final` ni a `runs/final-d8`;
+    sí a `runs/final3-xs`.
+  - **TeamTrack distinto de cero**: 6 pistas retenidas en 5 clips, también entre jugadores
+    que se mueven. Una llegaba a `runs/final-v3`.
+- **Qué cambia.**
+  - `scripts/teamtrack_to_long_csv.py` escribe los (0, 0) como NaN (`mask_missing`), y con
+    `--from-cache` reconstruye los CSV desde las ventanas ya descargadas, sin Kaggle. Los
+    CSV reconstruidos (`data/raw/teamtrack_fix0/`) son idénticos a los viejos salvo esos
+    puntos (y el `match_id`, que los viejos tenían de antes de D3 y D10).
+  - Los clips ya ingeridos se corrigen **como copias** (`scripts/mask_teamtrack_zeros.py`):
+    `data/clips_tt_fix0` (894 clips de 4 s) y `data/clips_d8_tt_fix0` (408 de 8 s), con los
+    mismos `clip_id` y `match_id`, así que todas las semillas se mantienen. Reingerir
+    habría cambiado los identificadores de clip (llevan el `match_id` viejo) y con ellos
+    el sorteo. Los 1.302 clips corregidos coinciden exactamente, en valores y en NaN, con
+    los CSV reconstruidos. `data/clips` no se toca.
+  - Pools nuevos: `data/pool_final4`, `data/pool_d8_final4` y `data/pool_final4_sb`. Son
+    los de D17 con las entradas de TeamTrack apuntando a las copias; el resto de enlaces
+    es idéntico.
+  - **Comprobación general en los controles** (`ControlConfig.drop_frozen`, activa en todos
+    los presets): una pista observada entera cuya posición es exactamente constante en la
+    ventana se descarta antes de elegir los 10 jugadores, en cualquier fuente. Un clip
+    sin pistas congeladas sale igual que antes, con los mismos sorteos (test). `prepare`
+    guarda `frozen_dropped_by_sport` y `frozen_dropped_by_source` en `config.json`.
+  - El preflight y el de A7b exigen `drop_frozen = True` y rechazan un conjunto con algún
+    jugador conservado que no se mueve. `runs/final-v3` ya no lo pasa.
+  - `runs/final` pasa a `runs/final-v3` y `runs/final-d8` a `runs/final-d8-v2`; los dos se
+    preparan de nuevo con los mismos parámetros que en D17 (`runs/prepare_final4.log`,
+    `runs/final-d8.prepare4.log`).
+- **Conjuntos nuevos.**
+  - `runs/final`: de 1.600 clips de entrada se conservan **1.532** (D17: 1.531). Balonmano
+    398 (EIGD 332 + TeamTrack 66; antes 334 + 63). EIGD pierde los 2 clips congelados;
+    TeamTrack gana 3 que antes se rechazaban por teletransporte (sus saltos a (0, 0)).
+    Pistas descartadas: 28 en 2 clips de EIGD (los dos rechazados) y 1 en un clip de
+    TeamTrack, que se conserva con 10 jugadores reales. Los 400 primeros son **los mismos
+    400 clips** que en D17, con la misma composición (151 partidos); cambian los
+    jugadores de 8 clips de balonmano de TeamTrack (los 7 afectados y uno cuya pista en
+    (0, 0), no elegida, cambiaba el sorteo). En todo el conjunto cambian 23 clips, todos
+    de balonmano de TeamTrack; los otros 1.506 comunes son idénticos byte a byte.
+  - `runs/final-d8`: se conservan **1.065** (D17: 1.063); balonmano 397, fútbol 281. De
+    los 300 primeros, 299 son los de D17.
+  - **Ningún jugador conservado está quieto ni en (0, 0)** en `runs/final`, `runs/final-d8`
+    ni en el conjunto entre fuentes (`runs/final4-xs`): auditoría sobre los clips
+    controlados y repitiendo la selección desde los pools corregidos
+    (`runs/analysis-2026-09-28/d18/`). Los dos preflights pasan.
+  - Renders revisados a ojo de 3 clips afectados que siguen en los 400
+    (`teamtrack-1st-train-1st_fisheye_480-510-00001`, `…2nd_fisheye_810-840-00002`,
+    `…2nd_fisheye_270-300-00005`): 10 jugadores, sin punto en la esquina. Los puntos
+    aislados que quedan son porteros en su área (se mueven 0,9-2,0 m en la ventana).
+- **Especialistas sobre `runs/final`** (azar 0,25; mismos comandos que en D17;
+  `runs/final/report_specialists.txt`, `specialists_breakdown.txt`, `contrasts.json`):
+
+  | Especialista | 1.532 clips | 400 primeros | D17 (1.531 / 400) |
+  |---|---|---|---|
+  | MiniRocket `motion` | 0,83 [0,81; 0,86] | 0,84 [0,80; 0,88] | 0,84 / 0,85 |
+  | MiniRocket `motion_shuffled` | 0,72 | 0,71 | 0,72 / 0,74 |
+  | MiniRocket `kinematics` | 0,75 | 0,76 | 0,76 / 0,76 |
+  | MiniRocket `kinematics_solo` | 0,71 | 0,72 | 0,70 / 0,69 |
+  | DeepSets `motion` | 0,80 | 0,79 | 0,80 / 0,79 |
+  | DeepSets `formation` | 0,55 | 0,55 | 0,54 / 0,51 |
+  | Baseline cinemático | 0,68 | 0,68 | 0,67 / 0,67 |
+  | Baseline `tempo` | 0,50 | 0,50 | 0,50 / 0,50 |
+  | Baseline `nuisance` (degenerado, D11) | 0,24 [0,17; 0,30], kappa −0,02 | 0,23 | 0,25 / 0,24 |
+
+  - Recall de MiniRocket `motion` por deporte: fútbol americano 0,92, baloncesto 0,82,
+    balonmano 0,78 y fútbol 0,82. El cinemático acierta el fútbol americano en 0,90.
+  - Por fuente, todos los clips: EIGD 0,80, Metrica 0,87, NFL 0,92, SkillCorner 0,81,
+    SportVU 0,82, y en TeamTrack 0,58 (baloncesto, 12 clips), 0,68 (balonmano, 66) y 0,74
+    (fútbol, 27). En los 400 primeros: EIGD 0,77, Metrica 0,93, NFL 0,93, SkillCorner
+    0,77, SportVU 0,88; TeamTrack 0,33 (3), 0,81 (16) y 0,75 (8).
+  - En los 19 clips afectados, MiniRocket `motion` acierta 15 (antes 11; los errores eran
+    sobre todo «fútbol»). El punto quieto **restaba** acierto: no inflaba el balonmano.
+  - Contrastes emparejados:
+
+    | Contraste | Todos los clips | 400 primeros |
+    |---|---|---|
+    | MiniRocket `motion − motion_shuffled` | +0,11 [0,09; 0,13] | +0,13 [0,08; 0,18] |
+    | MiniRocket `kinematics − kinematics_solo` | +0,04 [0,02; 0,06] | +0,035 [−0,01; 0,08], p = 0,15 |
+    | DeepSets `motion − formation` | +0,25 [0,21; 0,29] | +0,245 [0,19; 0,31] |
+
+  - `nuisance` contesta «baloncesto» en 906 de 1.532 clips.
+  - **Cuánto de esto es la corrección y cuánto el reentrenamiento.** Sobre los 1.529
+    clips comunes, 1.506 idénticos byte a byte, las etiquetas de MiniRocket coinciden con
+    las de D17 solo en el 85-90 % de los clips (DeepSets `formation` 79 %, cinemático 97
+    %, `tempo` 99,6 %): MiniRocket ajusta sus sesgos con los datos de entrenamiento, y
+    con 23 clips distintos cambian todas las predicciones. `kinematics_solo` pasa de
+    0,695 a 0,714 sobre clips idénticos. Los cambios de 1-3 puntos de la tabla son de ese
+    tamaño. En particular, `kinematics − kinematics_solo` en los 400 primeros pasa de
+    +0,065 (p = 0,008) a +0,035 (p = 0,15), sobre todo por ese ruido (8 de los 400 clips
+    cambian), y se informa así: con los especialistas, esa diferencia no es estable en
+    400 clips. En todos los clips sigue por encima de cero (+0,04 [0,02; 0,06]).
+- **Especialistas sobre `runs/final-d8`** (azar 0,33): MiniRocket `motion` 0,87 [0,84;
+  0,90] en los 1.065 clips y 0,86 en los 300 primeros; `motion_shuffled` 0,78 y 0,77;
+  `motion − motion_shuffled` +0,08 [0,05; 0,11] y +0,09 [0,04; 0,14]; `nuisance` 0,33
+  (degenerado, D11).
+- **Entre fuentes** (`runs/final4-xs`, desde `data/pool_final4_sb`; TeamTrack solo en
+  test): MiniRocket 0,97 dentro de las fuentes de entrenamiento y **0,96** sobre
+  TeamTrack nunca visto (D17: 0,95); cinemático 0,73 y 0,73. TeamTrack aporta 417 clips
+  (antes 420: 3 se quedan sin 10 jugadores observados). `drop_frozen` descarta además
+  79 pistas de Metrica en 23 clips, que siguen dentro con otros jugadores.
+- **Fuente dentro del fútbol** (`runs/final/source_id.json`): idéntico a D17, porque los
+  clips de fútbol no cambian. Cinemático 0,70 [0,66; 0,72], MiniRocket 0,69 [0,66; 0,71],
+  p exacto 1/66 en los dos.
+- **Coste.** `scripts/estimate_run.py` da lo mismo (575,95 USD, 12,3 h) y `DRY_RUN=1 bash
+  scripts/final_run.sh` sale con 0 y 28.600 llamadas por pasada: no cambia ni una celda
+  ni un `--limit`.
+- **No había datos de modelo.** Al escribir esto, `runs/final-v3/predictions/` y
+  `runs/final-d8-v2/predictions/` (y los de los conjuntos anteriores) contienen solo
+  especialistas: ningún modelo del pre-registro había respondido sobre ningún conjunto
+  final. La corrección se decide por lo que dicen los datos de seguimiento, no por
+  resultados.
 
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 
@@ -865,7 +1058,7 @@ el análisis primario.
 
 ## Anexo B. Coste y tiempo estimados
 
-`scripts/estimate_run.py` (recalculado el 2026-09-28 después de D14 y D17, sin cambios:
+`scripts/estimate_run.py` (recalculado el 2026-09-28 después de D14, D17 y D18, sin cambios:
 575,95 USD y 12,3 h; el coste depende del número de llamadas y de los tokens del piloto, no
 de qué clips salen), con los tokens medidos en `runs/pilot4-strict` (y en
 `runs/pilot-strict` para Gemini 3.1) y precios de lista: unos **576 USD** en total, 508
@@ -883,10 +1076,10 @@ pre-registradas y A7b al final.
 ## Anexo C. Requisitos antes de lanzar
 
 - `runs/final` construido (con `--reprs sheet,trails,text,video`, que necesita `.[video]`)
-  y el preflight en verde, con los valores fijados de D13. Lo está desde el 2026-09-28
-  (reconstruido en D17 desde `data/pool_final3`).
-- `runs/final-d8` construido y `preflight-a7b` en verde. También lo está (D17, desde
-  `data/pool_d8_final3`), y el lanzador marca su `plan.json` como exploratorio (D15).
+  y el preflight en verde, con los valores fijados de D13 y `drop_frozen` (D18). Lo está
+  desde el 2026-09-28 (reconstruido en D18 desde `data/pool_final4`).
+- `runs/final-d8` construido y `preflight-a7b` en verde. También lo está (reconstruido en
+  D18 desde `data/pool_d8_final4`), y el lanzador marca su `plan.json` como exploratorio (D15).
 - Opus 5.5 habilitado en el Model Garden de Vertex (hueco A6; lo hace Javier). Si no lo
   está, `report` lo saca de los contrastes y de la familia (D4).
 - `gcloud` autenticado. Claves de Azure y OpenRouter en sus ficheros, que el
