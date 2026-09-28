@@ -56,8 +56,9 @@ quede al azar (exploratorio).
 
 ## 3. Ítems
 
-- **Conjunto**: `runs/final`, reconstruido por tercera vez el 2026-09-28 desde
-  `data/pool_final4` (37.052 clips; D8, D17 y D18), antes de cualquier llamada a un modelo.
+- **Conjunto**: `runs/final`, reconstruido por cuarta vez el 2026-09-28 desde
+  `data/pool_final4` (37.052 clips; D8, D17, D18 y D19), antes de cualquier llamada a un
+  modelo.
   Preset `strict_smooth` (suavizado gaussiano, σ = 2 fotogramas), ventanas de 4 s a 5 Hz
   (20 fotogramas), `--per-sport 400`, las 5 condiciones y las representaciones `sheet`,
   `trails`, `text` y `video`. Además del preset:
@@ -69,6 +70,15 @@ quede al azar (exploratorio).
     ventana no es un jugador (un valor retenido o de relleno) y se descarta antes de
     elegir los 10 (`drop_frozen`; D18). En TeamTrack, un jugador no detectado viene como
     (0, 0) exacto y se lee como no observado (D18).
+  - **Tramos interpolados**: una pista que se mueve en línea exactamente recta a velocidad
+    exactamente constante (segunda diferencia < 0,1 mm por paso; quieta incluida) durante
+    **4 s o más** de la ventana está interpolada ahí, no medida, y se descarta antes de
+    elegir los 10 (`drop_linear`, `linear_min_s = 4.0`; D19). En la ventana de 4 s es la
+    ventana entera.
+  - **Pistas duplicadas**: dos pistas que no se separan más de **5 cm** en toda la ventana
+    (la distancia máxima, no la media) son un jugador con dos identificadores; se descarta
+    la copia de índice mayor antes de elegir los 10 (`drop_duplicates`, `duplicate_tol_m =
+    0.05`; D19).
   - **Fútbol americano**: un clip por jugada, que empieza en una fase **aleatoria** entre
     **1,0 s** después del snap y el final de la jugada menos 4 s (D1 y D16).
   - **Balonmano**: 6 partidos. Las dos partes del partido de TeamTrack forman un solo
@@ -83,19 +93,24 @@ quede al azar (exploratorio).
   | Deporte | Fuentes (clips) | Clips | Partidos |
   |---|---|---|---|
   | Fútbol americano | NFL Big Data Bowl 2023, semanas 1-8, fase aleatoria desde 1,0 s tras el snap (D1, D16) | 400 | 122 |
-  | Baloncesto | NBA SportVU 2015-16 (385) + TeamTrack (12) | 397 | 31 + 1 |
+  | Baloncesto | NBA SportVU 2015-16 (382) + TeamTrack (9) | 391 | 31 + 1 |
   | Balonmano | EIGD-H, 5 partidos de la HBL medidos con Kinexon (332) + TeamTrack (66) | 398 | 5 + 1 |
   | Fútbol | SkillCorner Open Data, solo posiciones detectadas (248) + Metrica (62) + TeamTrack (27) | 337 | 10 + 2 + 1 |
 
-  De 1.600 clips de entrada (400 por deporte) se conservan 1.532, de 173 partidos.
+  De 1.600 clips de entrada (400 por deporte) se conservan 1.526, de 173 partidos.
   Rechazos: SkillCorner 60 de 308 por número de jugadores (19 %, el único aviso de
-  `prepare`); TeamTrack 3 de 108 (2 por teletransporte y 1 por jugadores); SportVU 2 por
-  teletransporte y 1 por jugadores; EIGD 2 por jugadores, porque todas sus pistas están
-  congeladas (el arranque congelado de dos secuencias, D18). Pistas congeladas descartadas:
-  28 en esos 2 clips de EIGD y 1 en un clip de TeamTrack, que se conserva con 10 jugadores
-  reales (`frozen_dropped_by_source`). Ningún jugador conservado está quieto ni en (0, 0)
-  (`scripts/analysis/frozen_tracks.py`). `prepare` tardó 21 minutos
-  (`runs/prepare_final4.log`).
+  `prepare`); TeamTrack 6 de 108 (2 por teletransporte y 4 por jugadores: 3 clips de
+  baloncesto se quedan con 9 al quitar una pista interpolada, D19); SportVU 6 (2 por
+  teletransporte y 4 por jugadores: 3 son un jugador con dos identificadores, que deja 9
+  jugadores reales, D19); EIGD 2 por jugadores, porque todas sus pistas están congeladas
+  (el arranque congelado de dos secuencias, D18). Pistas descartadas antes de elegir:
+  congeladas, 28 en esos 2 clips de EIGD y 1 en un clip de TeamTrack
+  (`frozen_dropped_by_source`); interpoladas, 10 de TeamTrack en 10 clips
+  (`linear_dropped_by_source`); duplicadas, 3 de SportVU en 3 clips
+  (`duplicate_dropped_by_source`). Ningún jugador conservado está quieto, en (0, 0),
+  interpolado 4 s ni a 5 cm de otro en toda la ventana
+  (`scripts/analysis/duplicate_tracks.py`, `frozen_tracks.py`, `linear_tracks.py`).
+  `prepare` tardó 27 minutos (`runs/prepare_final5.log`).
 - **Preflight**. El lanzador se niega a arrancar (`scripts/run_plan.py preflight`) si el
   preset no es `strict_smooth`; si en `controls` no están exactamente `player_mode =
   random`, `n_players = 10`, `n_frames = 20`, `smooth = 2.0` y `max_speed_ms = 12.0`; si
@@ -105,7 +120,10 @@ quede al azar (exploratorio).
   falta una de las 5 condiciones que admite. El de A7b (`preflight-a7b`) fija igual
   `smooth = 2.0` y `max_speed_ms = 12.0`, con `n_frames = 40`. Los valores booleanos no
   valen como números (D13). Los dos exigen además `drop_frozen = True` y rechazan el
-  conjunto si algún jugador conservado no se mueve en ningún fotograma (D18).
+  conjunto si algún jugador conservado no se mueve en ningún fotograma (D18), y exigen
+  `drop_linear = True`, `linear_min_s = 4.0`, `drop_duplicates = True` y `duplicate_tol_m
+  = 0.05`, y rechazan el conjunto si dos jugadores conservados no se separan más de 5 cm en
+  toda la ventana (D19).
 - **Opciones**: las de `config.json` (`candidates`), es decir, los 4 deportes sin
   distractores. Azar = 1/|candidates| = 0,25.
 - **Muestra**: los **400 primeros clips** del orden `interleave` (reparto por
@@ -114,18 +132,23 @@ quede al azar (exploratorio).
   (fútbol americano 100, baloncesto 32, fútbol 13, balonmano 6). Por fuente: NFL 100,
   SportVU 97, EIGD 84, SkillCorner 77, Metrica 15 y TeamTrack 27 (3 de baloncesto, 16 de
   balonmano y 8 de fútbol). Las réplicas 2 y 3 usan los 200 primeros (50 por deporte),
-  que son un subconjunto de los 400. Son los mismos 400 clips que antes de D18: la
-  corrección solo cambió qué jugadores se ven en 23 clips de balonmano de TeamTrack, 8
-  de ellos entre los 400 (7 tenían un punto quieto).
+  que son un subconjunto de los 400. Frente a D18 cambian 2 de los 400, en la misma
+  posición, del mismo deporte y la misma fuente (D19): sale el 381
+  (`teamtrack-P3-val-P3_fisheye_30-60-00004`, con una pista interpolada) y entra
+  `teamtrack-P3-test-P3_fisheye_60-90-00000`; sale el 389
+  (`sportvu-0021500368-s012-00000`, un jugador con dos identificadores) y entra
+  `sportvu-0021500368-s107-00014`. Los otros 398 son idénticos.
 - **Celda A7b, clips de 8 s (secundaria y exploratoria; D7)**: `runs/final-d8`, con los
   mismos controles (`strict_smooth`, N = 10 al azar, 12 m/s) pero ventanas de **8 s**
   (`--n-frames 40`) y **3 deportes**: baloncesto, balonmano y fútbol (azar 1/3). No hay
   fútbol americano porque solo 42 clips NFL de mitad de jugada llegan a 8 s. Sale de
   `data/pool_d8_final4`, que son los clips de 8 s del barrido A7 con el balonmano y el
   fútbol de TeamTrack reagrupados como en D3 y D10, y con los (0, 0) de TeamTrack como no
-  observados (D18). De 1.200 clips de entrada se conservan 1.065
-  (baloncesto 387, balonmano 397, fútbol 281; por fuente SportVU 375, EIGD 333,
-  SkillCorner 195, Metrica 60 y TeamTrack 102) de 51 partidos. Muestra: los
+  observados (D18). De 1.200 clips de entrada se conservan 1.064
+  (baloncesto 386, balonmano 397, fútbol 281; por fuente SportVU 375, EIGD 333,
+  SkillCorner 195, Metrica 60 y TeamTrack 101) de 51 partidos. `drop_linear` quita 24
+  pistas de TeamTrack en 18 clips (uno sale); ninguna pista duplicada entra en el sorteo
+  (D19). Muestra: los
   **300 primeros** del orden `interleave` (100 por deporte, 51 partidos). Celdas:
   `motion/sheet` y `motion_shuffled/sheet`, con prompt neutro. La hoja sigue teniendo 8
   fotogramas: a 8 s quedan a unos 1,1 s uno de otro (a 4 s, a unos 0,55 s). Tiene su
@@ -339,8 +362,9 @@ la celda afectada y se informan las dos versiones en «Desviaciones».
 Todas las de 2026-09-28 son **anteriores a cualquier dato de modelo sobre el dataset
 final**. Cuando se escribieron, ningún modelo había respondido sobre `runs/final` ni
 `runs/final-d8`, ni sobre los conjuntos anteriores (`runs/final-v1`, `runs/final-v2`,
-`runs/final-v3`, `runs/final-d8-v1` y `runs/final-d8-v2`): los siete directorios
-`predictions/` contienen solo especialistas (comprobado de nuevo al escribir D10-D18). Los especialistas (MiniRocket, DeepSets y los
+`runs/final-v3`, `runs/final-v4`, `runs/final-d8-v1`, `runs/final-d8-v2` y
+`runs/final-d8-v3`): los nueve directorios `predictions/` contienen solo especialistas
+(comprobado de nuevo al escribir D10-D19). Los especialistas (MiniRocket, DeepSets y los
 baselines) sí se corrieron, sobre los conjuntos viejos y sobre los nuevos. No son datos de
 modelo en el sentido de este pre-registro (sección 7): sirvieron para encontrar los
 problemas y para comprobar los conjuntos reconstruidos, y sus números están abajo. Las
@@ -371,6 +395,7 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D16 | NFL: fase aleatoria desde 1,0 s tras el snap (no 0,5 s) | los clips seguían pegados al arranque de la jugada | regla fijada antes del ingest: ≥ 400 clips de ≥ 80 partidos; salen 1.125 de 122 | `78f144d` (datos: `runs/ingest_nflrand10.log`) |
 | D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
 | D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4`, `381d14e` |
+| D19 | Dos pistas a ≤ 5 cm en toda la ventana son un jugador con dos identificadores (`drop_duplicates`); un tramo exactamente recto de ≥ 4 s es interpolado, faltante (`drop_linear`); conjuntos reconstruidos | el modelo veía 9 jugadores dibujados como 10, y en TeamTrack pistas interpoladas como jugadores | verificador: SportVU 0021500368 segmento 12, posición 389 de los 400; par real más cercano en 4 s a 0,31 m (NFL 0,53 m); 0 de 434.859 pistas de otras fuentes rectas 4 s, 94 de TeamTrack | `f42e8ea`, `3a80332` y el commit de este texto |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
@@ -1047,6 +1072,276 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
   final. La corrección se decide por lo que dicen los datos de seguimiento, no por
   resultados.
 
+- **Notas de los verificadores (añadidas en D19, 2026-09-28).** Lo que los controles de
+  D18 dejan dentro, medido sobre los jugadores conservados de los conjuntos de D19
+  (`scripts/analysis/track_notes.py`, que repite la selección desde el crudo; salidas en
+  `runs/analysis-2026-09-28/d19/notes_*.json`):
+  - **Retenciones parciales.** Pistas exactamente quietas una parte de la ventana: al
+    menos 5 fotogramas (1 s), pero no la ventana entera, que es `drop_frozen`, ni 4 s o
+    más, que es `drop_linear` (D19). Se ven como un jugador que se para, y en casi todas
+    lo es.
+    - Recuento en `runs/final`: NFL 10, TeamTrack 4, Metrica 3 y SkillCorner 1 (400
+      primeros: NFL 3 y Metrica 1). En `runs/final-d8`: TeamTrack 10 y Metrica 2 (300
+      primeros: TeamTrack 1).
+    - Ejemplos:
+      - `nfl-2021090900-3406-rand-00000` (posición 8): tres jugadores quietos 5-7
+        fotogramas que en la ventana recorren 2,0-4,3 m. La NFL redondea a 0,01 yardas (9
+        mm), así que un jugador parado repite la posición exacta.
+      - `metrica-Sample_Game_1-00707` (139): 7 fotogramas quieto y 3,7 m recorridos.
+      - `teamtrack-P3-train-P3_fisheye_0-30-00002` (1021): 9 fotogramas y 1,9 m.
+    - El caso dudoso es `metrica-Sample_Game_1-00910` (1307, fuera de los 400): 10
+      fotogramas quieto y 1,5 cm en toda la ventana. Es de la fuente cuyas retenciones
+      largas D18 ya clasificó como artefacto, pero está por debajo de los 4 s de la regla
+      y se queda.
+  - **Pistas casi quietas (< 5 cm en 4 s) en la NFL y EIGD: probablemente reales.**
+    - Recuento: pistas conservadas que recorren menos de 5 cm en la ventana sin ser
+      constantes. En `runs/final`: NFL 7, EIGD 6, SportVU 4 y Metrica 1 (400 primeros:
+      NFL 2 y EIGD 1). En `runs/final-d8`: EIGD 2.
+    - EIGD: pasos medianos de 2-3 mm cada 0,2 s, el ruido del sensor Kinexon sobre un
+      jugador parado (p. ej. `eigd-e8a35a-00-02-00-00043`, posición 62, 3,2 cm).
+    - NFL: pasos de 0 o 9,14 mm, exactamente el redondeo de 0,01 yardas (p. ej.
+      `nfl-2021090900-3110-rand-00000`, 1432, 1,8 cm).
+    - SportVU: pasos de 2-5 mm.
+    - Ninguna es exactamente constante ni recta, y todas salen de fuentes que en D18 no
+      tenían ni una pista congelada. Son jugadores parados, y se quedan.
+  - **La pista de baloncesto de TeamTrack de la posición 381**
+    (`teamtrack-P3-val-P3_fisheye_30-60-00004`). En el crudo es una interpolación lineal
+    de 5,4 s, y en la ventana su segunda diferencia es 0,00 mm en los 18 pasos. Se decide
+    en D19: un tramo exactamente recto de ≥ 4 s es faltante (`drop_linear`). El clip se
+    queda con 9 jugadores y sale de los 400.
+  - **`fill_short_gaps` en los clips de 8 s.** La regla es la misma a 4 y a 8 s: huecos
+    interiores de ≤ 3 fotogramas (0,6 s), rellenos en línea recta, sobre el clip entero
+    antes de elegir la ventana, nunca en los extremos.
+    - Fotogramas rellenos entre los jugadores conservados:
+      - `runs/final`: SkillCorner 38 de 49.600 (0,08 %) y 0 en el resto.
+      - `runs/final-d8`: SkillCorner 66 de 78.000 (0,085 %), TeamTrack 3 y EIGD 1.
+    - La proporción es la misma a las dos duraciones.
+    - Un relleno da como mucho 5 fotogramas rectos, muy por debajo de los 20 de
+      `drop_linear`.
+  - **Entre fuentes.** El 0,96 de arriba se midió con copias y pistas rectas dentro. En el
+    conjunto de D19 (`runs/final5-xs`) es **0,95** (0,954).
+- **Actualizado por D19 (2026-09-28).** Este conjunto es ahora `runs/final-v4` (y el de 8
+  s, `runs/final-d8-v3`). Tenía 3 clips con un jugador duplicado (1 entre los 400) y 9
+  pistas de TeamTrack interpoladas toda la ventana (1 entre los 400). Los números de arriba
+  son los de ese conjunto; los del reconstruido están en D19.
+
+### D19 (2026-09-28). Pistas duplicadas (un jugador con dos identificadores) y tramos interpolados
+
+- **Qué encontró el verificador.** Algunas pistas crudas son el **mismo jugador con dos
+  identificadores**. En SportVU, partido 0021500368, segmento 12, los jugadores 2755 y 2749
+  comparten coordenadas en los 100 momentos. Su clip, `sportvu-0021500368-s012-00000`,
+  estaba en la posición 389 del orden `interleave` de `runs/final` (dentro de los 400). Hay
+  más en las posiciones 593 y 1281, y el verificador sospechaba de la 1261. En el conjunto
+  entre fuentes (`runs/final4-xs`) contó 107 clips, también de Metrica. El modelo ve 10
+  puntos, de los que 2 van siempre juntos: 9 jugadores. El segundo hallazgo: la pista de
+  baloncesto de TeamTrack del clip de la posición 381 es, en el crudo, una interpolación
+  lineal de 5,4 s.
+- **Qué es una copia: la regla y su umbral.** Dos pistas observadas enteras cuya distancia
+  **máxima** en la ventana es ≤ 5 cm son un jugador con dos identificadores. Se usa la
+  máxima, no la media: el par tiene que ir junto toda la ventana. Para fijar el umbral se
+  midió, en todos los clips del pool (`scripts/analysis/duplicate_tracks.py pool`, después
+  de `fill_short_gaps` y `drop_frozen`, como en los controles), la distancia máxima en la
+  ventana de cada par de pistas. La pregunta: ¿cuánto se acercan durante 4 s dos jugadores
+  que de verdad son distintos?
+
+  | Fuente (pool de 4 s) | Pares | Copias (máx. ≤ 5 cm) | Par más cercano que nunca coincide (máx.; mediana) |
+  |---|---|---|---|
+  | NFL | 259.875 | 0 | 0,53 m (0,46 m) |
+  | EIGD | 119.725 | 0 | 0,55 m (0,41 m) |
+  | SkillCorner | 614.338 | 0 | 0,51 m (0,40 m) |
+  | TeamTrack | 130.776 | 0 | 0,45 m (0,37 m) |
+  | SportVU | 1.046.951 | 114 pistas en 112 clips (105 idénticas al float) | 0,47 m (0,42 m) |
+  | Metrica | 659.240 | 32 pistas en 29 clips (32 idénticas) | 0,31 m (0,21 m) |
+
+  - «Nunca coincide» quiere decir ningún fotograma a ≤ 5 cm. Las copias van de 0 a 4,4 cm
+    de máxima y coinciden en los 20 fotogramas.
+  - Ningún par de jugadores distintos se queda a menos de **0,31 m** durante 4 s en
+    ninguna fuente. En la NFL (líneas en contacto) el par más cercano está a 0,53 m.
+    El umbral de 5 cm queda 6 veces por debajo del par real más cercano y 10 veces por
+    debajo en la NFL: no puede tocar a dos jugadores reales. En el pool de 8 s hay 21
+    copias en SportVU y 2 en Metrica; el par real más cercano está a 0,42 m (Metrica), y en
+    las demás fuentes a 0,79-1,45 m.
+  - En las cuatro fuentes sin copias ningún par pasa más de 4 de los 20 fotogramas a ≤ 5
+    cm (casi siempre 1: un cruce). Salidas en `runs/analysis-2026-09-28/d19/`
+    (`dup_pool_*.json`, `close_pairs_pool_final4.json`).
+- **Lo que la regla no quita: coincidencias parciales.** En SportVU y Metrica, entre 1 y 20
+  fotogramas a ≤ 5 cm hay un continuo, sin hueco (SportVU: 1.200 pares con 1 fotograma,
+  178 con 5, 34 con 10, 12 con 19). Son pares que coinciden la mayor parte de la ventana y
+  se separan en un extremo: una copia que empieza o acaba dentro de la ventana, o dos
+  pistas que el tracker funde mientras dos jugadores están en contacto. La máxima de esos
+  pares llega a 0,6 m en el extremo, por encima del par real más cercano (0,31 m), así que
+  **ningún umbral sobre la máxima los separa**. El de la posición 1261 es uno de ellos
+  (`sportvu-0021500314-s035-00000`): 19 de 20 fotogramas a ≤ 5 cm, 21 cm en el último.
+  - Pares conservados a ≤ 5 cm en al menos la mitad de la ventana (tras D19):
+    - `runs/final`: 4 clips (posiciones 985, 1261, 1439 y 1460), ninguno entre los 400.
+    - `runs/final-d8`: 3 clips (539, 803 y 851), ninguno entre los 300.
+    - `runs/final5-xs`: 212 de 32.167 clips (SportVU 191, Metrica 21).
+  - En `runs/final5-xs`, 2 de esos pares (`metrica-Sample_Game_1-00464` y
+    `sportvu-0021500496-s016-00002`, 10,5 y 8,1 cm de máxima en crudo) quedan a ≤ 5 cm
+    después del suavizado.
+  - Esta desviación aplica la regla de la ventana entera. La parcial queda medida y
+    abierta (hueco A16 en `gaps.md`).
+- **Tramos interpolados: decisión con datos.** La posición 381 era
+  `teamtrack-P3-val-P3_fisheye_30-60-00004`: una de sus pistas tiene segunda diferencia
+  0,00 mm en los 18 pasos de la ventana. Es una línea exactamente recta a velocidad
+  exactamente constante durante los 4 s. Medido en todo el pool
+  (`scripts/analysis/linear_tracks.py pool`; tolerancia de 0,1 mm por paso a 5 Hz, cuando
+  el redondeo de float32 a escala de campo es de ~0,01 mm y un jugador medido tiene de
+  milímetros a centímetros):
+
+  | Fuente (pool de 4 s) | Pistas | Rectas toda la ventana | Fotogramas en tramos rectos ≥ 1 s |
+  |---|---|---|---|
+  | TeamTrack (baloncesto / balonmano / fútbol) | 698 / 6.019 / 8.504 | 3 / 57 / 34 | 6,3 % / 9,4 % / 2,5 % |
+  | NFL, SportVU, EIGD, SkillCorner, Metrica | 434.859 | **0** | 0,02-0,28 % |
+
+  - TeamTrack anota posiciones clave e interpola entre ellas. En las otras cinco fuentes,
+    ninguna de 434.859 pistas es recta los 4 s, y solo 22 llegan a 15-19 fotogramas rectos
+    (quietas en Metrica y NFL, o SportVU).
+  - En el pool de 8 s, las pistas con ≥ 4 s rectos son:
+    - TeamTrack: 101 (98 en movimiento y 3 quietas);
+    - EIGD: 44, todas quietas (los arranques congelados de D18, que una ventana de 8 s
+      coge a medias);
+    - Metrica: 18 (15 quietas y 3 que derivan a < 0,03 m/s);
+    - SportVU y SkillCorner: 0.
+
+    Todo lo que la regla quita en otras fuentes es el artefacto que D18 ya quitaba.
+  - **Decisión:** un tramo exactamente recto de **4 s o más** dentro de la ventana es
+    interpolado, no medido. Se trata como faltante y la pista no se puede conservar
+    (`drop_linear`, `linear_min_s = 4.0`). En la ventana de 4 s es la ventana entera, que
+    nunca pasa fuera de TeamTrack. En la de 8 s coge además las retenciones de ≥ 4 s.
+  - Los tramos rectos más cortos siguen dentro, igual que las retenciones parciales
+    (notas en D18). `drop_frozen` es el caso de velocidad cero en la ventana entera y
+    sigue contándose aparte.
+- **Qué cambia** (`f42e8ea`; scripts de análisis en `3a80332`):
+  - `ControlConfig.drop_linear` y `drop_duplicates`, activos en todos los presets, con
+    `linear_min_s = 4.0` y `duplicate_tol_m = 0.05`. Después de `drop_frozen` y antes de
+    elegir los 10 se quitan primero los tramos rectos y luego las copias (se conserva la de
+    índice menor).
+  - `config.json` guarda `linear_dropped_by_*` y `duplicate_dropped_by_*` (por deporte y
+    por fuente: pistas, clips con alguna y clips rechazados después).
+  - Un clip sin pistas rectas ni copias sale igual que antes, con los mismos sorteos
+    (tests).
+  - Los dos preflights exigen los cuatro valores y rechazan un conjunto con dos jugadores
+    conservados a ≤ 5 cm en toda la ventana, medido en metros (unidades × `space_scale`).
+    `runs/final-v4` ya no lo pasa.
+  - Los tramos rectos se comprueban en la configuración y en la auditoría sobre el crudo,
+    no en los clips preparados, porque el suavizado curva los extremos de una ventana
+    recta.
+  - Los paseos sintéticos de los tests van ahora por arcos amplios, porque una recta
+    exacta es, por definición, una interpolación.
+- **Afectados antes de D19** (reproduciendo la selección desde el crudo):
+  - `runs/final` (ahora `runs/final-v4`):
+    - 3 clips con una copia conservada: 389 (dentro de los 400), 593 y 1281.
+    - 9 pistas de TeamTrack rectas toda la ventana: 3 de baloncesto, 4 de balonmano y 2 de
+      fútbol. Una estaba entre los 400: la 381.
+  - `runs/final-d8` (ahora `runs/final-d8-v3`): ninguna copia; 16 pistas de TeamTrack con
+    ≥ 4 s rectos, 6 de ellas entre los 300.
+  - `runs/final4-xs`: 119 pares copiados entre los conservados (SportVU 114, Metrica 5; el
+    verificador contó 107).
+- **Conjuntos nuevos** (mismos comandos que en D18: `runs/prepare_final5.log`,
+  `runs/final-d8.prepare5.log`, `runs/final5-xs.log`).
+  - `runs/final`: **1.526** clips (D18: 1.532), 173 partidos.
+    - SportVU pierde los 3 clips copiados, que se quedan con 9 jugadores; TeamTrack pierde
+      3 de baloncesto (de 12 a 9), que se quedan con 9 al quitar la pista recta.
+    - En otros 7 clips de TeamTrack (5 de balonmano y 2 de fútbol) cambian los jugadores.
+      Los otros 1.519 son idénticos a los de D18.
+    - **Los 400 primeros:** salen 2 y entran 2, en la misma posición y de la misma fuente.
+      Sale el 381 (`teamtrack-P3-val-P3_fisheye_30-60-00004`) y entra
+      `teamtrack-P3-test-P3_fisheye_60-90-00000`. Sale el 389
+      (`sportvu-0021500368-s012-00000`) y entra `sportvu-0021500368-s107-00014`. Los otros
+      398 son idénticos, con la misma composición por fuente y los mismos 151 partidos.
+  - `runs/final-d8`: **1.064** (D18: 1.065).
+    - `drop_linear` quita 24 pistas de TeamTrack en 18 clips. Sale uno de baloncesto y
+      cambian los jugadores de 16.
+    - Ninguna copia entra en el sorteo.
+    - **Los 300 primeros:** sale 1 (el 189, `teamtrack-P3-val-P3_fisheye_30-60-00002`) y
+      entra `teamtrack-P3-train-P3_fisheye_270-300-00001`. Cambian los jugadores de otros 4
+      de TeamTrack. La composición no cambia (51 partidos).
+  - `runs/final5-xs` (entre fuentes, desde `data/pool_final4_sb`): 32.167 clips (D18:
+    32.280).
+    - SportVU pierde 112 clips por copias.
+    - Metrica conserva sus 29 clips con copia, sin la copia.
+    - TeamTrack aporta 416 (65 de baloncesto y 351 de fútbol; D18: 68 y 349). 3 clips
+      salen por pistas rectas. Entran 2 de fútbol que antes se rechazaban por
+      teletransporte: al quitar su pista recta cambia el sorteo de los 10, y el jugador del
+      salto (36 y 6.797 m/s) ya no sale elegido.
+  - Preflights en verde (`preflight` y `preflight-a7b`).
+- **Auditoría** (recalculada sobre los clips preparados y repitiendo la selección desde el
+  crudo, en metros):
+  - En `runs/final`, `runs/final-d8` y `runs/final5-xs`, entre los jugadores conservados:
+    - 0 pares a ≤ 5 cm en toda la ventana en crudo;
+    - 0 pistas exactamente constantes;
+    - 0 puntos en (0, 0);
+    - 0 pistas con ≥ 4 s rectos.
+  - Paso más rápido: 11,02, 11,40 y 11,98 m/s (techo 12).
+  - Después del suavizado, 0 pares a ≤ 5 cm en `runs/final` y `runs/final-d8`, y los 2 de
+    `runs/final5-xs` de arriba.
+  - `frozen_tracks.py items` no marca ningún clip.
+  - Salidas en `runs/analysis-2026-09-28/d19/` (`dup_items_*_after.json`,
+    `frozen_items_*_after.json`, `notes_*.json`, `sample_diff_*.json`).
+- **Especialistas sobre `runs/final`** (azar 0,25; mismos comandos que en D18;
+  `runs/final_specialists5.log`, `report_specialists.txt`, `specialists_breakdown.txt`,
+  `contrasts.json`):
+
+  | Especialista | 1.526 clips | 400 primeros | D18 (1.532 / 400) |
+  |---|---|---|---|
+  | MiniRocket `motion` | 0,83 [0,81; 0,85] | 0,83 [0,80; 0,87] | 0,83 / 0,84 |
+  | MiniRocket `motion_shuffled` | 0,72 | 0,72 | 0,72 / 0,71 |
+  | MiniRocket `kinematics` | 0,75 | 0,74 | 0,75 / 0,76 |
+  | MiniRocket `kinematics_solo` | 0,71 | 0,68 | 0,71 / 0,72 |
+  | DeepSets `motion` | 0,80 | 0,80 | 0,80 / 0,79 |
+  | DeepSets `formation` | 0,53 | 0,53 | 0,55 / 0,55 |
+  | Baseline cinemático | 0,68 | 0,67 | 0,68 / 0,68 |
+  | Baseline `tempo` | 0,51 | 0,50 | 0,50 / 0,50 |
+  | Baseline `nuisance` (degenerado, D11) | 0,22 [0,15; 0,30], kappa −0,04 | 0,21 | 0,24 / 0,23 |
+
+  - Recall de MiniRocket `motion` por deporte: fútbol americano 0,92, baloncesto 0,79,
+    balonmano 0,79 y fútbol 0,83. El cinemático acierta el fútbol americano en 0,90.
+  - Por fuente, todos los clips: EIGD 0,81, Metrica 0,85, NFL 0,92, SkillCorner 0,83,
+    SportVU 0,79, y en TeamTrack 0,67 (baloncesto, 9 clips), 0,67 (balonmano, 66) y 0,78
+    (fútbol, 27). En los 400 primeros: EIGD 0,81, Metrica 0,93, NFL 0,90, SkillCorner
+    0,78, SportVU 0,82; TeamTrack 1,00 (3), 0,69 (16) y 0,88 (8).
+  - Contrastes emparejados (`scripts/analysis/contrasts.py`):
+
+    | Contraste | Todos los clips | 400 primeros |
+    |---|---|---|
+    | MiniRocket `motion − motion_shuffled` | +0,11 [0,09; 0,13] | +0,12 [0,07; 0,16] |
+    | MiniRocket `kinematics − kinematics_solo` | +0,04 [0,02; 0,07] | +0,06 [0,01; 0,10], p = 0,011 |
+    | DeepSets `motion − formation` | +0,27 [0,23; 0,31] | +0,27 [0,21; 0,33] |
+
+  - `nuisance` contesta «baloncesto» en 670 de 1.526 clips.
+  - `kinematics − kinematics_solo` en los 400 primeros vuelve a +0,06 (D17: +0,065; D18:
+    +0,035, p = 0,15) con 398 clips idénticos a los de D18. Confirma lo que decía D18: con
+    los especialistas esa diferencia no es estable en 400 clips, porque MiniRocket se
+    reentrena y cambia sus predicciones. En todos los clips se mantiene en +0,04.
+- **Especialistas sobre `runs/final-d8`** (azar 0,33; `runs/final-d8.spec5.log`):
+  - MiniRocket `motion`: 0,87 [0,84; 0,90] en los 1.064 clips y 0,89 [0,85; 0,92] en los
+    300 primeros (D18: 0,87 y 0,86).
+  - `motion_shuffled`: 0,79 y 0,77.
+  - `motion − motion_shuffled`: +0,08 [0,05; 0,11] y +0,11 [0,07; 0,16] (D18: +0,08 y
+    +0,09).
+  - `nuisance`: 0,34 (degenerado, D11).
+- **Entre fuentes** (`runs/final5-xs`, TeamTrack solo en test;
+  `cross_source_teamtrack_s0.json`):
+  - MiniRocket: 0,97 dentro de las fuentes de entrenamiento y **0,95** sobre TeamTrack
+    nunca visto (0,954; D18: 0,964).
+  - Cinemático: 0,73 y 0,73.
+  - Lo corrige TeamTrack sin sus pistas rectas: la tabla del test pierde 3 clips de
+    baloncesto, y la confusión de MiniRocket queda en 7 de 65 baloncesto leídos como fútbol
+    y 12 de 351 fútbol leídos como baloncesto.
+- **Fuente dentro del fútbol** (`runs/final/source_id.json`): los clips de fútbol no
+  cambian y el resultado es el mismo. Cinemático 0,70 [0,66; 0,72] y MiniRocket 0,69
+  [0,66; 0,71], p exacto 1/66 en los dos. Solo cambian los recuentos de baloncesto del
+  JSON.
+- **Coste.** `scripts/estimate_run.py` da lo mismo: 575,95 USD y 12,3 h.
+  `DRY_RUN=1 bash scripts/final_run.sh` sale con 0 y 28.600 llamadas por pasada.
+- **No había datos de modelo.** Al escribir esto, los directorios `predictions/` de
+  `runs/final`, `runs/final-d8`, `runs/final-v1` a `runs/final-v4` y `runs/final-d8-v1` a
+  `runs/final-d8-v3` contienen solo especialistas (`baseline__*`, `minirocket__*`,
+  `deepsets__*`), y ninguno tiene `logs/` del lanzador. Ningún modelo del pre-registro ha
+  respondido sobre ningún conjunto final. La corrección se decide por lo que dicen los
+  datos de seguimiento y los datos crudos, no por resultados.
+
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 
 La semianchura del IC al 95 % de los contrastes primarios fue de 0,04 a 0,10 (EE ≈
@@ -1058,7 +1353,7 @@ el análisis primario.
 
 ## Anexo B. Coste y tiempo estimados
 
-`scripts/estimate_run.py` (recalculado el 2026-09-28 después de D14, D17 y D18, sin cambios:
+`scripts/estimate_run.py` (recalculado el 2026-09-28 después de D14, D17, D18 y D19, sin cambios:
 575,95 USD y 12,3 h; el coste depende del número de llamadas y de los tokens del piloto, no
 de qué clips salen), con los tokens medidos en `runs/pilot4-strict` (y en
 `runs/pilot-strict` para Gemini 3.1) y precios de lista: unos **576 USD** en total, 508
@@ -1076,10 +1371,11 @@ pre-registradas y A7b al final.
 ## Anexo C. Requisitos antes de lanzar
 
 - `runs/final` construido (con `--reprs sheet,trails,text,video`, que necesita `.[video]`)
-  y el preflight en verde, con los valores fijados de D13 y `drop_frozen` (D18). Lo está
-  desde el 2026-09-28 (reconstruido en D18 desde `data/pool_final4`).
+  y el preflight en verde, con los valores fijados de D13, `drop_frozen` (D18) y
+  `drop_linear` / `drop_duplicates` (D19). Lo está desde el 2026-09-28 (reconstruido en D19
+  desde `data/pool_final4`).
 - `runs/final-d8` construido y `preflight-a7b` en verde. También lo está (reconstruido en
-  D18 desde `data/pool_d8_final4`), y el lanzador marca su `plan.json` como exploratorio (D15).
+  D19 desde `data/pool_d8_final4`), y el lanzador marca su `plan.json` como exploratorio (D15).
 - Opus 5.5 habilitado en el Model Garden de Vertex (hueco A6; lo hace Javier). Si no lo
   está, `report` lo saca de los contrastes y de la familia (D4).
 - `gcloud` autenticado. Claves de Azure y OpenRouter en sus ficheros, que el
