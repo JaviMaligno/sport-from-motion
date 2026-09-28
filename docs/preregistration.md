@@ -127,9 +127,11 @@ quede al azar (exploratorio).
 Total: 28.600 llamadas, las 25.600 pre-registradas el 2026-09-27 más las 3.000 de A7b.
 Orden de ejecución por modelo (primarias primero): `motion/sheet`,
 `motion_shuffled/sheet`, `formation/sheet`, `motion/text`, `motion/sheet` informado;
-luego A7b (`motion/sheet` y `motion_shuffled/sheet` a 8 s, todos menos Jev); luego
-`kinematics/sheet`, `kinematics_solo/sheet`, `motion/trails`, vídeo (Gemini) y
-réplicas. Si la corrida se corta, lo que falte es secundario.
+luego las secundarias pre-registradas, `kinematics/sheet`, `kinematics_solo/sheet`,
+`motion/trails`, vídeo (Gemini) y réplicas; y **al final** A7b (`motion/sheet` y
+`motion_shuffled/sheet` a 8 s, todos menos Jev), que es exploratoria. Si la corrida se
+corta, lo que falte es secundario o exploratorio. Si falla algo antes de la primera
+llamada (preflight o `plan.json`), el lanzador sale con error y no llama a ningún modelo.
 
 Ajustes: `--max-tokens 1024` (más el margen de razonamiento del backend, 16.384),
 `--temperature 0` pedido. Los modelos que rechazan `temperature` (gpt-5.6, Sonnet 5 en

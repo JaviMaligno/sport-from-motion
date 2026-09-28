@@ -59,7 +59,7 @@ PRIMARY_CELLS = [
     ("formation", "sheet", "neutral", 1, N), ("motion", "text", "neutral", 1, N),
     ("motion", "sheet", "informed", 1, N),
 ]
-# A7b (D7): 8 s items, 3 sports; chat models only, right after the primary cells
+# A7b (D7): 8 s items, 3 sports; chat models only, last (after every secondary cell)
 A7B_CELLS = [("motion", "sheet", "neutral", 1, N_D8), ("motion_shuffled", "sheet", "neutral", 1, N_D8)]
 SECONDARY_CELLS = [
     ("kinematics", "sheet", "neutral", 1, N), ("kinematics_solo", "sheet", "neutral", 1, N),
@@ -84,10 +84,9 @@ def plan() -> dict[str, list[tuple]]:
         if m.startswith("jev"):
             out[m] = [(*c, fmt, "final") for c in JEV_CELLS for fmt in ("text", "json")]
             continue
-        out[m] = ([(*c, None, "final") for c in PRIMARY_CELLS]
-                  + [(*c, None, "d8") for c in A7B_CELLS]
-                  + [(*c, None, "final") for c in SECONDARY_CELLS
-                     + (VIDEO_CELLS if m.startswith("vertex:") else []) + REPLICATE_CELLS])
+        out[m] = ([(*c, None, "final") for c in PRIMARY_CELLS + SECONDARY_CELLS
+                   + (VIDEO_CELLS if m.startswith("vertex:") else []) + REPLICATE_CELLS]
+                  + [(*c, None, "d8") for c in A7B_CELLS])
     return out
 
 

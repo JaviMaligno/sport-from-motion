@@ -312,3 +312,117 @@ def test_preflight_a7b_pins_speed_ceiling_and_smoothing(tmp_path, controls, expe
     cfg["controls"].update(controls)
     (root / "config.json").write_text(json.dumps(cfg))
     assert rp.preflight_a7b(root, 300) == [expect]
+
+
+# ------------------------------------------------------------- final_run.sh (sandboxed)
+
+FAKE_PYTHON = """#!/usr/bin/env bash
+echo "$*" >> "$SANDBOX_LOG/python.log"
+case "$2" in
+  write) cat > /dev/null; [ -n "${FAIL_WRITE:-}" ] && exit 1; echo "plan written" ;;
+  preflight*) [ -n "${FAIL_PREFLIGHT:-}" ] && exit 1; echo "preflight ok" ;;
+  check) echo "no unrecovered errors" ;;
+esac
+exit 0
+"""
+FAKE_MOTION_SPORT = """#!/usr/bin/env bash
+echo "$*" >> "$SANDBOX_LOG/calls.log"
+case "$*" in *kinematics_solo*) exit 3 ;; esac   # one failing cell: not fatal
+exit 0
+"""
+
+
+def _sandbox(tmp_path):
+    """A copy of final_run.sh whose .venv/bin/{python,motion-sport} only log their calls."""
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "final_run.sh").write_text((SCRIPTS / "final_run.sh").read_text())
+    for name, body in (("python", FAKE_PYTHON), ("motion-sport", FAKE_MOTION_SPORT)):
+        f = repo / ".venv" / "bin" / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(body)
+        f.chmod(0o755)
+    (tmp_path / "log").mkdir()
+    return repo
+
+
+def _launch(tmp_path, repo, **env):
+    import subprocess
+
+    base = {"PATH": os.environ["PATH"], "HOME": str(tmp_path),  # no real key file is read
+            "SANDBOX_LOG": str(tmp_path / "log"), "AZURE_OPENAI_KEY": "x",
+            "OPENROUTER_API_KEY": "x", "PASSES": "1",
+            "MODELS": "azure-openai:gpt-5.6-sol vertex:gemini-3.1-pro-preview"}
+    return subprocess.run(["bash", str(repo / "scripts" / "final_run.sh")], capture_output=True,
+                          text=True, env={**base, **env}, timeout=120)
+
+
+def _calls(tmp_path):
+    f = tmp_path / "log" / "calls.log"
+    return f.read_text().splitlines() if f.exists() else []
+
+
+@pytest.mark.parametrize("fail", ["FAIL_WRITE", "FAIL_PREFLIGHT"])
+def test_final_run_aborts_before_any_model_call_when_bookkeeping_fails(tmp_path, fail):
+    repo = _sandbox(tmp_path)
+    r = _launch(tmp_path, repo, **{fail: "1"})
+    assert r.returncode != 0
+    assert _calls(tmp_path) == []
+    if fail == "FAIL_WRITE":
+        assert "write_plan failed: no model was called" in r.stderr
+        assert not (repo / "runs" / "final" / "logs").exists()
+
+
+def test_final_run_survives_a_failing_cell_and_runs_every_command(tmp_path):
+    repo = _sandbox(tmp_path)
+    r = _launch(tmp_path, repo)
+    assert r.returncode == 0, r.stderr
+    assert "ALL DONE" in r.stdout
+    calls = _calls(tmp_path)
+    # the kinematics_solo cell fails for both models; everything after it still runs
+    assert len(calls) == 14 + 16
+    for m in ("azure-openai:gpt-5.6-sol", "vertex:gemini-3.1-pro-preview"):
+        mine = [c for c in calls if f"--model {m} " in c]
+        assert "--items runs/final-d8" in mine[-1] and "--items runs/final-d8" in mine[-2]
+    log = (tmp_path / "log" / "python.log").read_text()
+    assert log.count("run_plan.py write") == 2 and log.count("run_plan.py check") == 2
+
+
+def _dry_run_cells(tmp_path, models):
+    repo = _sandbox(tmp_path)
+    r = _launch(tmp_path, repo, DRY_RUN="1", MODELS=models)
+    assert r.returncode == 0, r.stderr
+    out = []
+    for line in r.stdout.splitlines():
+        if line.startswith("#"):
+            continue
+        w = line.split()
+        opt = {w[i]: w[i + 1] for i in range(2, len(w) - 1) if w[i].startswith("--")}
+        out.append((opt["--condition"], opt["--repr"], opt.get("--prompt-style", "neutral"),
+                    int(opt.get("--replicate", 1)), int(opt["--limit"]),
+                    "d8" if opt["--items"].endswith("final-d8") else "final"))
+    assert not _calls(tmp_path)  # a dry run calls nothing
+    return out
+
+
+def test_final_run_order_primary_then_secondaries_then_a7b_last(tmp_path):
+    primary = [("motion", "sheet", "neutral", 1, 400), ("motion_shuffled", "sheet", "neutral", 1, 400),
+               ("formation", "sheet", "neutral", 1, 400), ("motion", "text", "neutral", 1, 400),
+               ("motion", "sheet", "informed", 1, 400)]
+    secondary = [("kinematics", "sheet", "neutral", 1, 400),
+                 ("kinematics_solo", "sheet", "neutral", 1, 400), ("motion", "trails", "neutral", 1, 400)]
+    video = [("motion", "video", "neutral", 1, 400), ("motion_shuffled", "video", "neutral", 1, 400)]
+    replicates = [(c, "sheet", "neutral", k, 200) for k in (2, 3) for c in ("motion", "motion_shuffled")]
+    a7b = [("motion", "sheet", "neutral", 1, 300, "d8"), ("motion_shuffled", "sheet", "neutral", 1, 300, "d8")]
+    fin = lambda cells: [(*c, "final") for c in cells]  # noqa: E731
+    assert _dry_run_cells(tmp_path / "chat", "azure-openai:gpt-5.6-sol") == \
+        fin(primary + secondary + replicates) + a7b
+    assert _dry_run_cells(tmp_path / "gemini", "vertex:gemini-3.1-pro-preview") == \
+        fin(primary + secondary + video + replicates) + a7b
+
+
+def test_estimate_run_plan_matches_the_launcher_order(tmp_path):
+    est = _script("estimate_run")
+    for m in ("azure-openai:gpt-5.6-sol", "vertex:gemini-3.1-pro-preview"):
+        want = [(c, r, s, k, n, items) for c, r, s, k, n, _fmt, items in est.plan()[m]]
+        assert _dry_run_cells(tmp_path / m.replace(":", "_"), m) == want

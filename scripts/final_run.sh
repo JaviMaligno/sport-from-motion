@@ -2,21 +2,28 @@
 # Final model run, pre-registered in docs/preregistration.md. Do not change the cells,
 # N or the models after the first call without amending (and dating) that document.
 #
-# One background subshell per model; cells in pre-registered order, primary first.
+# One background subshell per model. Order per model: the 5 primary cells, then the
+# pre-registered secondaries (kinematics, kinematics_solo, trails, video for Gemini,
+# replicates), then A7b last. If the run is cut, what is missing is the least important.
 # Resumable: re-running skips answered items and retries errored / unparseable ones
 # (every cell is run PASSES times; later passes only redo what failed).
 # Logs in $ITEMS/logs/<model>.log; $ITEMS/plan.json and $D8_ITEMS/plan.json hold the planned
 # rows per prediction file (report and the error summary flag cells with missing rows); an
 # error summary at the end.
 #
+# Bookkeeping (preflight, plan.json, logs dir) runs under `set -e -o pipefail`: if any of it
+# fails the script exits non-zero before the first model call. The per-model subshells run
+# with `set +e`: a failing command there is a cell with errors, which the next pass
+# (PASSES) or a relaunch retries, and the error summary reports.
+#
 # A7b (deviation D7, exploratory, outside the Holm family): every chat model also answers
 # motion/sheet and motion_shuffled/sheet on the 8 s items ($D8_ITEMS, 3 sports, first ND8
-# clips), right after its primary cells. Jev (text only) has no A7b cell.
+# clips), after all its other cells. Jev (text only) has no A7b cell.
 #
 #   DRY_RUN=1 bash scripts/final_run.sh        # print the commands, touch nothing
 #   bash scripts/final_run.sh                  # the run
 #   MODELS="vertex:gemini-3.1-pro-preview" bash scripts/final_run.sh   # one model
-set -u
+set -euo pipefail
 cd "$(dirname "$0")/.."
 ITEMS=${ITEMS:-runs/final}
 N=${N:-400}            # first N clips of the interleaved order (100 per sport)
@@ -51,8 +58,8 @@ fi
 cells_for() {  # $1 = model id
   case "$1" in
     jev*|laya*) echo "$JEV_CELLS" ;;
-    vertex:*) echo "$PRIMARY_CELLS $A7B_CELLS $SECONDARY_CELLS $VIDEO_CELLS $REPLICATE_CELLS" ;;
-    *) echo "$PRIMARY_CELLS $A7B_CELLS $SECONDARY_CELLS $REPLICATE_CELLS" ;;
+    vertex:*) echo "$PRIMARY_CELLS $SECONDARY_CELLS $VIDEO_CELLS $REPLICATE_CELLS $A7B_CELLS" ;;
+    *) echo "$PRIMARY_CELLS $SECONDARY_CELLS $REPLICATE_CELLS $A7B_CELLS" ;;
   esac
 }
 
@@ -90,10 +97,11 @@ error_summary() {  # unrecovered errors per file (> 2 % flagged) + planned cells
 }
 
 write_plan() {  # <items>/plan.json: planned rows per prediction file, from these very commands
-  # (each directory keeps only the commands that run on it)
-  local d
+  # (each directory keeps only the commands that run on it). Any failure -> non-zero.
+  local d m
   for d in "$ITEMS" "$D8_ITEMS"; do
-    for m in $MODELS; do commands_for "$m"; done | .venv/bin/python scripts/run_plan.py write "$d"
+    for m in $MODELS; do commands_for "$m"; done \
+      | .venv/bin/python scripts/run_plan.py write "$d" || return 1
   done
 }
 
@@ -111,10 +119,11 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 preflight
-write_plan
+write_plan || { echo "write_plan failed: no model was called" >&2; exit 1; }
 mkdir -p "$ITEMS/logs"
 for m in $MODELS; do
   (
+    set +e  # a failing cell is retried by the next pass / a relaunch, not fatal
     for pass in $(seq "$PASSES"); do
       echo "=== pass $pass"
       while IFS= read -r cmd; do
