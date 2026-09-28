@@ -6,17 +6,22 @@
     python scripts/run_plan.py check runs/final
     # the items must be the pre-registered set (final_run.sh refuses to start otherwise)
     python scripts/run_plan.py preflight runs/final 400 "<models>"
+    # the exploratory 8 s cells (A7b, deviation D7): 3 sports, 40 frames, sheet only
+    python scripts/run_plan.py preflight-a7b runs/final-d8 300
 
 `<items>/plan.json` is {"cells": {<prediction file stem>: planned rows}}. The stem is
 the file `motion-sport run` writes for that cell (pipeline._pred_path), so a planned
 cell that never started shows up as missing, not as silently absent. The planned rows
-come from the `--limit` of each command (the first N of the interleaved order).
+come from the `--limit` of each command (the first N of the interleaved order). A
+command whose `--items` is another directory (the A7b cells on runs/final-d8) belongs to
+that directory's plan and is skipped here.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
+import os
 import shlex
 import sys
 
@@ -26,7 +31,7 @@ from motion_sport.backends.decision import is_decision_model
 
 def plan_from_commands(items_dir: str | pathlib.Path, lines: list[str]) -> dict:
     """`motion-sport run ...` lines -> {"cells": {stem: limit}}. Lines that are not a
-    run command (comments, blank) are ignored."""
+    run command (comments, blank), or that run on another items directory, are ignored."""
     ap = argparse.ArgumentParser(add_help=False)
     for flag in ("--items", "--model", "--condition", "--repr", "--prompt-style",
                  "--state-format"):
@@ -40,6 +45,8 @@ def plan_from_commands(items_dir: str | pathlib.Path, lines: list[str]) -> dict:
         if len(words) < 2 or not words[0].endswith("motion-sport") or words[1] != "run":
             continue
         a = ap.parse_args(words[2:])
+        if a.items and not _same_dir(a.items, items_dir):
+            continue
         if a.limit is None:
             raise ValueError(f"run command without --limit, no planned size: {line}")
         name = a.model + ("+json" if is_decision_model(a.model) and a.state_format == "json"
@@ -49,6 +56,10 @@ def plan_from_commands(items_dir: str | pathlib.Path, lines: list[str]) -> dict:
                                    replicate=a.replicate).stem
         cells[stem] = a.limit
     return {"cells": cells}
+
+
+def _same_dir(a: str | pathlib.Path, b: str | pathlib.Path) -> bool:
+    return os.path.realpath(a) == os.path.realpath(b)
 
 
 def write_plan(items_dir: str | pathlib.Path, lines: list[str]) -> pathlib.Path:
@@ -126,6 +137,41 @@ def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[
     return bad
 
 
+# exploratory 8 s cells (A7b, docs/preregistration.md deviation D7): same controls as the
+# final set, 40 frames (8 s at 5 Hz), 3 sports (no mid-play NFL clip lasts 8 s)
+A7B_CANDIDATES = ["basketball", "handball", "soccer"]
+A7B_N_FRAMES = 40
+A7B_CELLS = {("motion", "sheet"), ("motion_shuffled", "sheet")}
+
+
+def preflight_a7b(items_dir: str | pathlib.Path, n: int) -> list[str]:
+    """-> the reasons the items are not the A7b set ([] = ok)."""
+    root = pathlib.Path(items_dir)
+    cfg = json.loads((root / "config.json").read_text())
+    bad = []
+    if cfg.get("preset") != "strict_smooth":
+        bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
+    controls = cfg.get("controls") or cfg.get("control_config") or {}
+    for key, want in {**PREFLIGHT_CONTROLS, "n_frames": A7B_N_FRAMES}.items():
+        if controls.get(key) != want:
+            bad.append(f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}")
+    if not controls.get("max_speed_ms"):
+        bad.append(f"controls.max_speed_ms is {controls.get('max_speed_ms')!r}: the teleport "
+                   "ceiling must be set (D2)")
+    if sorted(cfg.get("candidates") or []) != A7B_CANDIDATES:
+        bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {A7B_CANDIDATES}")
+    per = n // len(A7B_CANDIDATES)
+    short = {s: k for s, k in cfg.get("clips_kept_by_sport", {}).items() if k < per}
+    if short:
+        bad.append(f"sports with fewer than {per} clips: {short}")
+    items = [json.loads(line) for line in (root / "items.jsonl").read_text().splitlines()
+             if line.strip()]
+    missing = A7B_CELLS - {(i["condition"], i["repr"]) for i in items}
+    if missing:
+        bad.append(f"missing cells {sorted(missing)}")
+    return bad
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -137,9 +183,13 @@ def main() -> None:
     f.add_argument("items")
     f.add_argument("n", type=int, help="clips per cell (N of final_run.sh)")
     f.add_argument("models", help="space-separated model ids (MODELS of final_run.sh)")
+    f8 = sub.add_parser("preflight-a7b", help="the 8 s items must be the A7b set (D7)")
+    f8.add_argument("items")
+    f8.add_argument("n", type=int, help="clips per cell (ND8 of final_run.sh)")
     a = ap.parse_args()
-    if a.cmd == "preflight":
-        bad = preflight(a.items, a.n, a.models.split())
+    if a.cmd in ("preflight", "preflight-a7b"):
+        bad = (preflight(a.items, a.n, a.models.split()) if a.cmd == "preflight"
+               else preflight_a7b(a.items, a.n))
         if bad:
             sys.exit("preflight failed:\n  " + "\n  ".join(bad))
         cfg = json.loads((pathlib.Path(a.items) / "config.json").read_text())

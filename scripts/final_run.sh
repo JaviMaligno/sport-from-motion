@@ -5,8 +5,13 @@
 # One background subshell per model; cells in pre-registered order, primary first.
 # Resumable: re-running skips answered items and retries errored / unparseable ones
 # (every cell is run PASSES times; later passes only redo what failed).
-# Logs in $ITEMS/logs/<model>.log; $ITEMS/plan.json holds the planned rows per prediction
-# file (report and the error summary flag cells with missing rows); an error summary at the end.
+# Logs in $ITEMS/logs/<model>.log; $ITEMS/plan.json and $D8_ITEMS/plan.json hold the planned
+# rows per prediction file (report and the error summary flag cells with missing rows); an
+# error summary at the end.
+#
+# A7b (deviation D7, exploratory, outside the Holm family): every chat model also answers
+# motion/sheet and motion_shuffled/sheet on the 8 s items ($D8_ITEMS, 3 sports, first ND8
+# clips), right after its primary cells. Jev (text only) has no A7b cell.
 #
 #   DRY_RUN=1 bash scripts/final_run.sh        # print the commands, touch nothing
 #   bash scripts/final_run.sh                  # the run
@@ -16,14 +21,18 @@ cd "$(dirname "$0")/.."
 ITEMS=${ITEMS:-runs/final}
 N=${N:-400}            # first N clips of the interleaved order (100 per sport)
 NREP=${NREP:-200}      # replicates 2 and 3: first NREP clips
+D8_ITEMS=${D8_ITEMS:-runs/final-d8}   # A7b: 8 s clips, 3 sports
+ND8=${ND8:-300}        # A7b: first ND8 clips of its interleaved order (100 per sport)
 WORKERS=${WORKERS:-6}
 GEMINI_WORKERS=${GEMINI_WORKERS:-12}
 PASSES=${PASSES:-2}
 DRY_RUN=${DRY_RUN:-0}
 MODELS=${MODELS:-"azure-openai:gpt-5.6-sol azure-openai:gpt-5.6-terra vertex-anthropic:claude-sonnet-5 vertex-anthropic:claude-opus-5-5 vertex:gemini-3.1-pro-preview jev-openrouter:~typesafe/jev-latest"}
 
-# cell = condition:repr:prompt_style:replicate:limit  (keep in sync with scripts/estimate_run.py)
+# cell = condition:repr:prompt_style:replicate:limit[:items]  (keep in sync with
+# scripts/estimate_run.py); items defaults to $ITEMS
 PRIMARY_CELLS="motion:sheet:neutral:1:$N motion_shuffled:sheet:neutral:1:$N formation:sheet:neutral:1:$N motion:text:neutral:1:$N motion:sheet:informed:1:$N"
+A7B_CELLS="motion:sheet:neutral:1:$ND8:$D8_ITEMS motion_shuffled:sheet:neutral:1:$ND8:$D8_ITEMS"   # chat models only
 SECONDARY_CELLS="kinematics:sheet:neutral:1:$N kinematics_solo:sheet:neutral:1:$N motion:trails:neutral:1:$N"
 VIDEO_CELLS="motion:video:neutral:1:$N motion_shuffled:video:neutral:1:$N"   # vertex: (Gemini) only
 REPLICATE_CELLS="motion:sheet:neutral:2:$NREP motion_shuffled:sheet:neutral:2:$NREP motion:sheet:neutral:3:$NREP motion_shuffled:sheet:neutral:3:$NREP"
@@ -42,19 +51,19 @@ fi
 cells_for() {  # $1 = model id
   case "$1" in
     jev*|laya*) echo "$JEV_CELLS" ;;
-    vertex:*) echo "$PRIMARY_CELLS $SECONDARY_CELLS $VIDEO_CELLS $REPLICATE_CELLS" ;;
-    *) echo "$PRIMARY_CELLS $SECONDARY_CELLS $REPLICATE_CELLS" ;;
+    vertex:*) echo "$PRIMARY_CELLS $A7B_CELLS $SECONDARY_CELLS $VIDEO_CELLS $REPLICATE_CELLS" ;;
+    *) echo "$PRIMARY_CELLS $A7B_CELLS $SECONDARY_CELLS $REPLICATE_CELLS" ;;
   esac
 }
 
 commands_for() {  # one `motion-sport run` per line, in run order
-  local m=$1 w=$WORKERS fmts="-" cell cond rep style k lim f
+  local m=$1 w=$WORKERS fmts="-" cell cond rep style k lim items f
   case "$m" in vertex:*) w=$GEMINI_WORKERS ;; esac
   case "$m" in jev*|laya*) fmts="text json" ;; esac
   for cell in $(cells_for "$m"); do
-    IFS=: read -r cond rep style k lim <<< "$cell"
+    IFS=: read -r cond rep style k lim items <<< "$cell"
     for f in $fmts; do
-      printf '%s' ".venv/bin/motion-sport run --items $ITEMS --model $m --condition $cond --repr $rep --limit $lim --workers $w"
+      printf '%s' ".venv/bin/motion-sport run --items ${items:-$ITEMS} --model $m --condition $cond --repr $rep --limit $lim --workers $w"
       [ "$style" != neutral ] && printf ' --prompt-style %s' "$style"
       [ "$k" != 1 ] && printf ' --replicate %s' "$k"
       [ "$f" != - ] && printf ' --state-format %s' "$f"
@@ -67,23 +76,35 @@ preflight() {  # the items must be the pre-registered set (scripts/run_plan.py p
   # strict_smooth, N=10 random players, teleport ceiling set, NFL at a random phase (D1-D2),
   # >= N/4 clips per sport, informed prompts and every planned representation
   .venv/bin/python scripts/run_plan.py preflight "$ITEMS" "$N" "$MODELS" || exit 1
+  # A7b (D7): 8 s items, 3 sports, same controls, motion/motion_shuffled in sheet
+  .venv/bin/python scripts/run_plan.py preflight-a7b "$D8_ITEMS" "$ND8" || exit 1
 }
 
 error_summary() {  # unrecovered errors per file (> 2 % flagged) + planned cells with missing rows
-  .venv/bin/python scripts/run_plan.py check "$ITEMS"
+  for d in "$ITEMS" "$D8_ITEMS"; do
+    echo "# $d"
+    .venv/bin/python scripts/run_plan.py check "$d"
+  done
 }
 
-write_plan() {  # $ITEMS/plan.json: planned rows per prediction file, from these very commands
-  for m in $MODELS; do commands_for "$m"; done | .venv/bin/python scripts/run_plan.py write "$ITEMS"
+write_plan() {  # <items>/plan.json: planned rows per prediction file, from these very commands
+  # (each directory keeps only the commands that run on it)
+  local d
+  for d in "$ITEMS" "$D8_ITEMS"; do
+    for m in $MODELS; do commands_for "$m"; done | .venv/bin/python scripts/run_plan.py write "$d"
+  done
 }
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "# DRY RUN: items=$ITEMS N=$N NREP=$NREP WORKERS=$WORKERS GEMINI_WORKERS=$GEMINI_WORKERS PASSES=$PASSES"
-  [ -f "$ITEMS/items.jsonl" ] || echo "# note: $ITEMS/items.jsonl does not exist yet (preflight runs only for real)"
+  echo "# DRY RUN: items=$ITEMS N=$N NREP=$NREP d8_items=$D8_ITEMS ND8=$ND8 WORKERS=$WORKERS GEMINI_WORKERS=$GEMINI_WORKERS PASSES=$PASSES"
+  for d in "$ITEMS" "$D8_ITEMS"; do
+    [ -f "$d/items.jsonl" ] || echo "# note: $d/items.jsonl does not exist yet (preflight runs only for real)"
+  done
   for m in $MODELS; do
     echo "# --- $m -> $ITEMS/logs/${m//[:\/]/_}.log ($(commands_for "$m" | wc -l | tr -d ' ') commands x $PASSES passes)"
     commands_for "$m"
   done
+  echo "# calls per pass: $(for m in $MODELS; do commands_for "$m"; done | sed -n 's/.*--limit \([0-9]*\).*/\1/p' | paste -sd+ - | bc)"
   exit 0
 fi
 

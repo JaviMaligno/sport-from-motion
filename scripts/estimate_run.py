@@ -9,6 +9,11 @@ and prices the planned cells. Nothing is sent to any API.
 Sources, in order: runs/pilot4-strict (4 sports, the prompt of the final run), then
 runs/pilot-strict (pilot 1, 2 sports: the only Gemini 3.1 usage), then a proxy (the
 closest measured model / representation, always named in the output).
+
+A7b (deviation D7): motion/sheet and motion_shuffled/sheet on the 8 s items
+(runs/final-d8, 3 sports, first 300 clips), every chat model. Priced with the 4-sport
+4 s sheet usage: the sheet is the same 8-frame image, and the prompt has one option
+fewer (a few tokens less), so the estimate is slightly high.
 """
 from __future__ import annotations
 
@@ -48,12 +53,17 @@ CHARS_PER_TOKEN = 4.0    # only for the extra text of the informed prompt
 # The plan. Keep in sync with scripts/final_run.sh (same cells, same order).
 # (condition, repr, prompt_style, replicate, n_clips)
 # ---------------------------------------------------------------------------
-N, N_REP = 400, 200
-CHAT_CELLS = [
+N, N_REP, N_D8 = 400, 200, 300
+PRIMARY_CELLS = [
     ("motion", "sheet", "neutral", 1, N), ("motion_shuffled", "sheet", "neutral", 1, N),
     ("formation", "sheet", "neutral", 1, N), ("motion", "text", "neutral", 1, N),
-    ("motion", "sheet", "informed", 1, N), ("kinematics", "sheet", "neutral", 1, N),
-    ("kinematics_solo", "sheet", "neutral", 1, N), ("motion", "trails", "neutral", 1, N),
+    ("motion", "sheet", "informed", 1, N),
+]
+# A7b (D7): 8 s items, 3 sports; chat models only, right after the primary cells
+A7B_CELLS = [("motion", "sheet", "neutral", 1, N_D8), ("motion_shuffled", "sheet", "neutral", 1, N_D8)]
+SECONDARY_CELLS = [
+    ("kinematics", "sheet", "neutral", 1, N), ("kinematics_solo", "sheet", "neutral", 1, N),
+    ("motion", "trails", "neutral", 1, N),
 ]
 VIDEO_CELLS = [("motion", "video", "neutral", 1, N), ("motion_shuffled", "video", "neutral", 1, N)]
 REPLICATE_CELLS = [(c, "sheet", "neutral", k, N_REP) for k in (2, 3)
@@ -67,13 +77,17 @@ FINAL_WORKERS = {"vertex:gemini-3.1-pro-preview": 12}  # others: 6
 
 
 def plan() -> dict[str, list[tuple]]:
+    """model -> [(condition, repr, prompt_style, replicate, n_clips, state_format, items)],
+    items = "final" or "d8" (A7b)."""
     out = {}
     for m in PRICES:
         if m.startswith("jev"):
-            out[m] = [(*c, fmt) for c in JEV_CELLS for fmt in ("text", "json")]
+            out[m] = [(*c, fmt, "final") for c in JEV_CELLS for fmt in ("text", "json")]
             continue
-        cells = CHAT_CELLS + (VIDEO_CELLS if m.startswith("vertex:") else []) + REPLICATE_CELLS
-        out[m] = [(*c, None) for c in cells]
+        out[m] = ([(*c, None, "final") for c in PRIMARY_CELLS]
+                  + [(*c, None, "d8") for c in A7B_CELLS]
+                  + [(*c, None, "final") for c in SECONDARY_CELLS
+                     + (VIDEO_CELLS if m.startswith("vertex:") else []) + REPLICATE_CELLS])
     return out
 
 
@@ -185,6 +199,7 @@ def main() -> None:
           f"pilot seconds/call x calls / workers, assuming pilots ran with {PILOT_WORKERS} "
           "workers and throughput scales with workers (rate limits may not)\n")
     tot_usd, tot_calls, walls = 0.0, 0, []
+    a7b_usd, a7b_calls = 0.0, 0
     hdr = f"{'model':38} {'calls':>6} {'in Mtok':>8} {'out Mtok':>8} {'USD':>8} {'hours':>6}  notes"
     print(hdr)
     print("-" * len(hdr))
@@ -193,19 +208,24 @@ def main() -> None:
         workers = FINAL_WORKERS.get(model, 6)
         calls = tin = tout = secs = 0.0
         notes, lines = set(), []
-        for cond, rep, style, k, n, fmt in cells:
+        for cond, rep, style, k, n, fmt, items in cells:
             u, note = estimate_cell(model, cond, rep, style, fmt, measured, extra)
             ci, co = n * u["in"], n * u["out"]
             usd = (ci * pin + co * pout) / 1e6
+            if items == "d8":
+                a7b_usd += usd
+                a7b_calls += n
+                note = "; ".join(x for x in (note, "A7b 8 s, 3 sports <- 4 s sheet usage") if x)
             calls += n
             tin += ci
             tout += co
             secs += n * (u["sec_per_call"] or 0) / workers
             for part in note.split("; "):
-                if part and not part.startswith("informed") and "not measured" not in part:
+                if part and not part.startswith(("informed", "A7b")) and "not measured" not in part:
                     notes.add(part)
             cell = f"{cond}/{rep}" + ("" if style == "neutral" else f"[{style}]") + \
-                ("" if k == 1 else f" r{k}") + (f" ({fmt})" if fmt else "")
+                ("" if k == 1 else f" r{k}") + (f" ({fmt})" if fmt else "") + \
+                (" [A7b 8 s]" if items == "d8" else "")
             lines.append(f"    {cell:38} {n:6d} {ci / 1e6:8.3f} {co / 1e6:8.3f} {usd:8.2f}"
                          f"  in {u['in']:.0f} out {u['out']:.0f} tok/call"
                          + (f"  [{note}]" if note else ""))
@@ -220,6 +240,8 @@ def main() -> None:
     print("-" * len(hdr))
     print(f"{'TOTAL':38} {int(tot_calls):6d} {'':8} {'':8} {tot_usd:8.2f} {max(walls):6.1f}  "
           "(hours = slowest model; models run in parallel)")
+    print(f"{'  of which A7b (8 s, runs/final-d8)':38} {a7b_calls:6d} {'':8} {'':8} {a7b_usd:8.2f}"
+          "         (exploratory; priced with the 4 s sheet usage)")
 
 
 if __name__ == "__main__":

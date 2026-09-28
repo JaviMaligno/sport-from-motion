@@ -228,3 +228,43 @@ def test_preflight_cli_exit_code(tmp_path):
     (ok / "config.json").write_text(json.dumps(cfg))
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert r.returncode == 1 and "controls.player_mode" in r.stderr
+
+
+def test_plan_keeps_only_the_commands_on_its_own_items(tmp_path):
+    rp = _script("run_plan")
+    main, d8 = tmp_path / "final", tmp_path / "final-d8"
+    lines = [
+        f"motion-sport run --items {main} --model azure-openai:gpt-5.6-sol --condition motion "
+        "--repr sheet --limit 400",
+        f"motion-sport run --items {d8} --model azure-openai:gpt-5.6-sol --condition motion "
+        "--repr sheet --limit 300",
+    ]
+    assert rp.plan_from_commands(main, lines)["cells"] == {"azure-openai__gpt-5.6-sol__motion__sheet": 400}
+    assert rp.plan_from_commands(d8, lines)["cells"] == {"azure-openai__gpt-5.6-sol__motion__sheet": 300}
+
+
+def _d8_like(tmp_path, *, n_frames=40, candidates=("basketball", "handball", "soccer"),
+             cells=(("motion", "sheet"), ("motion_shuffled", "sheet"))):
+    root = tmp_path / "final-d8"
+    root.mkdir(parents=True)
+    ctrl = {"n_players": 10, "player_mode": "random", "n_frames": n_frames, "smooth": 2.0,
+            "max_speed_ms": 12.0}
+    (root / "config.json").write_text(json.dumps({
+        "preset": "strict_smooth", "controls": ctrl, "candidates": list(candidates),
+        "clips_kept_by_sport": {s: 100 for s in candidates}}))
+    items = [{"clip_id": f"{s}-{k}", "sport": s, "condition": c, "repr": r}
+             for s in candidates for k in range(3) for c, r in cells]
+    (root / "items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
+    return root
+
+
+def test_preflight_a7b(tmp_path):
+    rp = _script("run_plan")
+    assert rp.preflight_a7b(_d8_like(tmp_path / "ok"), 300) == []
+    bad = rp.preflight_a7b(_d8_like(tmp_path / "d4", n_frames=20), 300)
+    assert bad == ["controls.n_frames is 20, pre-registered 40"]
+    bad = rp.preflight_a7b(_d8_like(tmp_path / "af", candidates=(
+        "american_football", "basketball", "handball", "soccer")), 300)
+    assert len(bad) == 1 and bad[0].startswith("candidates are")
+    bad = rp.preflight_a7b(_d8_like(tmp_path / "cells", cells=(("motion", "sheet"),)), 300)
+    assert bad == ["missing cells [('motion_shuffled', 'sheet')]"]
