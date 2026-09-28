@@ -177,7 +177,10 @@ def test_primary_view_restricts_specialists_to_the_models_clips(tmp_path):
 
 
 def _final_like(tmp_path, *, controls=None, af_tags=("mid_play", "random_phase"),
-                preset="strict_smooth", reprs=("sheet", "text", "trails", "video")):
+                preset="strict_smooth", reprs=("sheet", "text", "trails", "video"),
+                candidates=None, drop_cells=()):
+    from motion_sport.pipeline import VALID
+
     root = tmp_path / "final"
     root.mkdir()
     sports = ["american_football", "basketball", "handball", "soccer"]
@@ -185,11 +188,13 @@ def _final_like(tmp_path, *, controls=None, af_tags=("mid_play", "random_phase")
             "tempo": None, "n_frames": 20, "drop_team": True, "smooth": 2.0, "max_speed_ms": 12.0}
     ctrl.update(controls or {})
     (root / "config.json").write_text(json.dumps({
-        "preset": preset, "controls": ctrl, "candidates": sports,
-        "clips_kept_by_sport": {s: 100 for s in sports}}))
-    items = [{"clip_id": f"{s}-{k}", "sport": s, "repr": r, "prompt_informed": "...",
-              "tags": list(af_tags) if s == "american_football" else []}
-             for s in sports for k in range(3) for r in reprs]
+        "preset": preset, "controls": ctrl, "candidates": list(candidates or sports),
+        "clips_kept_by_sport": {s: 150 for s in sports}}))
+    # like prepare: every condition in every representation that can show it
+    items = [{"clip_id": f"{s}-{k}", "sport": s, "condition": c, "repr": r,
+              "prompt_informed": "...", "tags": list(af_tags) if s == "american_football" else []}
+             for s in sports for k in range(3) for r in reprs for c in VALID
+             if r in VALID[c] and (c, r) not in drop_cells]
     (root / "items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
     return root
 
@@ -208,10 +213,33 @@ def test_preflight_accepts_the_preregistered_set(tmp_path):
     ({"preset": "strict"}, "preset is 'strict'"),
     ({"af_tags": ("play", "mid_play")}, "3/3 american_football clips not tagged random_phase"),
     ({"reprs": ("sheet", "text", "trails")}, "missing representations ['video']"),
+    # pinned exactly (2026-09-28): a preset edit or a stale set must not slip through
+    ({"controls": {"n_frames": 40}}, "controls.n_frames is 40, pre-registered 20"),
+    ({"controls": {"n_frames": None}}, "controls.n_frames is None"),
+    ({"controls": {"max_speed_ms": 15.0}}, "controls.max_speed_ms is 15.0, pre-registered 12.0"),
+    ({"controls": {"max_speed_ms": 12.5}}, "controls.max_speed_ms is 12.5"),
+    ({"controls": {"max_speed_ms": 0}}, "controls.max_speed_ms is 0"),
+    ({"controls": {"max_speed_ms": True}}, "controls.max_speed_ms is True"),
+    ({"controls": {"smooth": 1.0}}, "controls.smooth is 1.0, pre-registered 2.0"),
+    ({"controls": {"smooth": None}}, "controls.smooth is None"),
+    ({"candidates": ["american_football", "basketball", "handball", "soccer", "rugby_union"]},
+     "candidates are"),
+    ({"candidates": ["basketball", "handball", "soccer"]}, "candidates are"),
+    ({"drop_cells": {("formation", "sheet")}}, "missing cells [('formation', 'sheet')]"),
+    ({"drop_cells": {("kinematics_solo", "text")}}, "missing cells [('kinematics_solo', 'text')]"),
+    ({"drop_cells": {("motion_shuffled", "video")}}, "missing cells [('motion_shuffled', 'video')]"),
 ])
 def test_preflight_rejects_what_is_not_preregistered(tmp_path, kw, expect):
     bad = _script("run_plan").preflight(_final_like(tmp_path, **kw), 400, MODELS)
     assert len(bad) == 1 and bad[0].startswith(expect)
+
+
+def test_preflight_accepts_integral_values_and_skips_video_without_gemini(tmp_path):
+    rp = _script("run_plan")
+    root = _final_like(tmp_path, controls={"max_speed_ms": 12, "smooth": 2},
+                       drop_cells={("motion", "video")})
+    assert rp.preflight(root, 400, ["azure-openai:gpt-5.6-sol"]) == []
+    assert rp.preflight(root, 400, MODELS) == ["missing cells [('motion', 'video')]"]
 
 
 def test_preflight_cli_exit_code(tmp_path):
@@ -268,3 +296,19 @@ def test_preflight_a7b(tmp_path):
     assert len(bad) == 1 and bad[0].startswith("candidates are")
     bad = rp.preflight_a7b(_d8_like(tmp_path / "cells", cells=(("motion", "sheet"),)), 300)
     assert bad == ["missing cells [('motion_shuffled', 'sheet')]"]
+
+
+@pytest.mark.parametrize("controls, expect", [
+    ({"max_speed_ms": 15.0}, "controls.max_speed_ms is 15.0, pre-registered 12.0"),
+    ({"max_speed_ms": None}, "controls.max_speed_ms is None, pre-registered 12.0"),
+    ({"max_speed_ms": 0}, "controls.max_speed_ms is 0, pre-registered 12.0"),
+    ({"smooth": 1.0}, "controls.smooth is 1.0, pre-registered 2.0"),
+    ({"smooth": None}, "controls.smooth is None, pre-registered 2.0"),
+])
+def test_preflight_a7b_pins_speed_ceiling_and_smoothing(tmp_path, controls, expect):
+    rp = _script("run_plan")
+    root = _d8_like(tmp_path)
+    cfg = json.loads((root / "config.json").read_text())
+    cfg["controls"].update(controls)
+    (root / "config.json").write_text(json.dumps(cfg))
+    assert rp.preflight_a7b(root, 300) == [expect]

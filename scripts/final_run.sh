@@ -73,10 +73,12 @@ commands_for() {  # one `motion-sport run` per line, in run order
 }
 
 preflight() {  # the items must be the pre-registered set (scripts/run_plan.py preflight):
-  # strict_smooth, N=10 random players, teleport ceiling set, NFL at a random phase (D1-D2),
-  # >= N/4 clips per sport, informed prompts and every planned representation
+  # strict_smooth, N=10 random players, 20 frames, smooth=2.0, max_speed_ms=12.0 exactly,
+  # the 4 sports as candidates, NFL at a random phase (D1-D2), >= N/4 clips per sport,
+  # informed prompts, every planned representation with all its conditions
   .venv/bin/python scripts/run_plan.py preflight "$ITEMS" "$N" "$MODELS" || exit 1
-  # A7b (D7): 8 s items, 3 sports, same controls, motion/motion_shuffled in sheet
+  # A7b (D7): 8 s items (40 frames), 3 sports, same controls pinned exactly,
+  # motion/motion_shuffled in sheet
   .venv/bin/python scripts/run_plan.py preflight-a7b "$D8_ITEMS" "$ND8" || exit 1
 }
 

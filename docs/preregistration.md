@@ -86,10 +86,13 @@ quede al azar (exploratorio).
   teletransporte (9 %), SportVU 1 por teletransporte y 1 por jugadores, Metrica 1 por
   teletransporte.
 - **Preflight**. El lanzador se niega a arrancar (`scripts/run_plan.py preflight`) si el
-  preset no es `strict_smooth`; si en `controls` no están `player_mode = random`,
-  `n_players = 10` y un `max_speed_ms`; si algún clip de fútbol americano no lleva la
+  preset no es `strict_smooth`; si en `controls` no están exactamente `player_mode =
+  random`, `n_players = 10`, `n_frames = 20`, `smooth = 2.0` y `max_speed_ms = 12.0`; si
+  `candidates` no son los 4 deportes; si algún clip de fútbol americano no lleva la
   etiqueta `random_phase`; si algún deporte tiene menos de 100 clips; si faltan los
-  prompts informados, o si falta una representación planificada.
+  prompts informados; si falta una representación planificada, o si en alguna de ellas
+  falta una de las 5 condiciones que admite. El de A7b (`preflight-a7b`) fija igual
+  `smooth = 2.0` y `max_speed_ms = 12.0`, con `n_frames = 40`.
 - **Opciones**: las de `config.json` (`candidates`), es decir, los 4 deportes sin
   distractores. Azar = 1/|candidates| = 0,25.
 - **Muestra**: los **400 primeros clips** del orden `interleave` (reparto por

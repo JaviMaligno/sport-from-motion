@@ -98,8 +98,21 @@ def check(items_dir: str | pathlib.Path) -> list[str]:
     return out
 
 
-# pre-registered item set (docs/preregistration.md section 3 and deviations D1-D2, 2026-09-28)
-PREFLIGHT_CONTROLS = {"player_mode": "random", "n_players": 10}
+# pre-registered item set (docs/preregistration.md section 3 and deviations D1-D2, 2026-09-28):
+# N = 10 random players, the 12 m/s teleport ceiling (D2) and the strict_smooth smoothing
+# (sigma = 2 frames), pinned exactly: a preset edit must not slip through
+PREFLIGHT_CONTROLS = {"player_mode": "random", "n_players": 10, "max_speed_ms": 12.0,
+                      "smooth": 2.0}
+N_FRAMES = 20  # 4 s at 5 Hz
+CANDIDATES = ["american_football", "basketball", "handball", "soccer"]
+
+
+def _controls(cfg: dict, pinned: dict) -> list[str]:
+    controls = cfg.get("controls") or cfg.get("control_config") or {}
+    return [f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}"
+            for key, want in pinned.items()
+            # exact: 12 == 12.0 is fine, None / 0 / 15.0 / True are not
+            if type(controls.get(key)) is bool or controls.get(key) != want]
 
 
 def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[str]:
@@ -109,13 +122,9 @@ def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[
     bad = []
     if cfg.get("preset") != "strict_smooth":
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
-    controls = cfg.get("controls") or cfg.get("control_config") or {}
-    for key, want in PREFLIGHT_CONTROLS.items():
-        if controls.get(key) != want:
-            bad.append(f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}")
-    if not controls.get("max_speed_ms"):
-        bad.append(f"controls.max_speed_ms is {controls.get('max_speed_ms')!r}: the teleport "
-                   "ceiling must be set (D2)")
+    bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": N_FRAMES})
+    if sorted(cfg.get("candidates") or []) != CANDIDATES:
+        bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {CANDIDATES}")
     per = n // len(cfg["candidates"])
     short = {s: k for s, k in cfg["clips_kept_by_sport"].items() if k < per}
     if short:
@@ -129,6 +138,13 @@ def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[
                                           else set())
     if need - reprs:
         bad.append(f"missing representations {sorted(need - reprs)}")
+    # every one of the 5 conditions in each planned representation that can show it
+    # (pipeline.VALID; e.g. trails has no formation or motion_shuffled)
+    cells = {(i.get("condition"), i["repr"]) for i in items}
+    missing = sorted((c, r) for r in need & reprs for c, ok in pipeline.VALID.items()
+                     if r in ok and (c, r) not in cells)
+    if missing:
+        bad.append(f"missing cells {missing}")
     af = {i["clip_id"] for i in items if i["sport"] == "american_football"}
     aligned = {i["clip_id"] for i in items
                if i["sport"] == "american_football" and "random_phase" not in i.get("tags", [])}
@@ -154,13 +170,7 @@ def preflight_a7b(items_dir: str | pathlib.Path, n: int) -> list[str]:
     bad = []
     if cfg.get("preset") != "strict_smooth":
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
-    controls = cfg.get("controls") or cfg.get("control_config") or {}
-    for key, want in {**PREFLIGHT_CONTROLS, "n_frames": A7B_N_FRAMES}.items():
-        if controls.get(key) != want:
-            bad.append(f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}")
-    if not controls.get("max_speed_ms"):
-        bad.append(f"controls.max_speed_ms is {controls.get('max_speed_ms')!r}: the teleport "
-                   "ceiling must be set (D2)")
+    bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": A7B_N_FRAMES})
     if sorted(cfg.get("candidates") or []) != A7B_CANDIDATES:
         bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {A7B_CANDIDATES}")
     per = n // len(A7B_CANDIDATES)
