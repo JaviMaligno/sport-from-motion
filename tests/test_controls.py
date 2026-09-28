@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from motion_sport.controls import (
-    PRESETS, ControlConfig, apply_controls, fill_short_gaps, fit_window, fix_player_count,
+    PRESETS, ControlConfig, apply_controls, duplicate_tracks, fill_short_gaps, fit_window,
+    fix_player_count, linear_tracks, pair_max_distance,
     frozen_tracks, max_step_speed, median_speed, normalize_space, random_rigid, select_players,
     window_span,
 )
@@ -95,13 +96,18 @@ def test_strict_smooth_reduces_jitter_and_keeps_shape():
     assert jerk(b) < 0.5 * jerk(a)
 
 
-def _walk(n_players=12, t=20, speed=5.0, seed=0):
-    """Players walking in straight lines at `speed` m/s, 5 Hz, in metres."""
+def _walk(n_players=12, t=20, speed=5.0, seed=0, radius=200.0):
+    """Players walking at `speed` m/s, 5 Hz, in metres, on wide arcs (radius 200 m): the
+    step length is `speed` / 5 to 1e-6, and the path is not an exact straight line, which
+    only an interpolation is (D19: second difference v^2 dt^2 / R = 5 mm per step)."""
     rng = np.random.default_rng(seed)
     start = rng.uniform(0, 50, (n_players, 2))
     ang = rng.uniform(0, 2 * np.pi, n_players)
-    v = np.stack([np.cos(ang), np.sin(ang)], 1) * speed
-    return (start[None] + np.arange(t)[:, None, None] / 5.0 * v[None]).astype(np.float32)
+    u = np.stack([np.cos(ang), np.sin(ang)], 1)
+    nrm = np.stack([-u[:, 1], u[:, 0]], 1)
+    th = (np.arange(t) / 5.0 * speed / radius)[:, None, None]
+    return (start[None] + radius * (np.sin(th) * u[None] + (1 - np.cos(th)) * nrm[None])
+            ).astype(np.float32)
 
 
 def test_max_step_speed_is_in_metres_per_second():
@@ -218,10 +224,177 @@ def test_clips_without_frozen_tracks_are_unchanged_by_the_check():
 
 
 def test_drop_frozen_off_keeps_the_old_behaviour_and_toy_clips_are_exempt():
-    cfg = ControlConfig(n_players=12, drop_frozen=False)
+    # a whole-window hold is also exactly linear (D19): the old behaviour needs both off
+    cfg = ControlConfig(n_players=12, drop_frozen=False, drop_linear=False)
     xy = _walk(n_players=12, t=20)
     xy[:, 0] = 0.0
     assert apply_controls(_clip(xy), cfg, np.random.default_rng(0)) is not None
     toy = Clip(clip_id="c", sport="soccer", source="toy", match_id="m", fps=5.0, xy=xy)
     assert apply_controls(toy, ControlConfig(n_players=12), np.random.default_rng(0)) is not None
     assert apply_controls(_clip(xy), ControlConfig(n_players=12), np.random.default_rng(0)) is None
+
+
+# ---------------------------------------------------------------- duplicated tracks (D19)
+
+def _dup(xy, i, j, jitter=0.0, seed=0):
+    """Track j becomes a copy of track i, with an optional per-frame jitter (metres)."""
+    xy[:, j] = xy[:, i] + np.random.default_rng(seed).uniform(-jitter, jitter, xy[:, i].shape)
+    return xy
+
+
+def test_pair_max_distance_is_the_largest_over_frames_and_inf_off_observed():
+    xy = _walk(n_players=4, t=20)
+    xy[:, 1] = xy[:, 0] + [0.3, 0.0]
+    xy[9, 1] = xy[9, 0] + [0.0, 2.0]          # one frame 2 m apart: the max, not the mean
+    xy[5, 3] = np.nan                         # not fully observed
+    d = pair_max_distance(xy)
+    assert d[0, 1] == pytest.approx(2.0, abs=1e-5) and d[1, 0] == d[0, 1]
+    assert np.isinf(d[0, 0]) and np.isinf(d[0, 3]) and np.isinf(d[3, 2])
+
+
+def test_duplicate_tracks_keep_the_lower_index_and_use_the_max_not_the_mean():
+    xy = _walk(n_players=6, t=20)
+    _dup(xy, 1, 4, jitter=0.01)               # within 2 cm every frame: a copy
+    _dup(xy, 2, 5)
+    xy[:, 5] += [0.02, 0.0]                   # 2 cm off throughout: still a copy
+    assert duplicate_tracks(xy, 0.05).tolist() == [False, False, False, False, True, True]
+    part = _walk(n_players=3, t=20)
+    _dup(part, 0, 2)
+    part[-1, 2] += [0.5, 0.0]                 # a copy for 19 frames, 50 cm apart at the end
+    assert not duplicate_tracks(part, 0.05).any()  # mean 2.5 cm, max 50 cm: not "the whole window"
+    three = _walk(n_players=4, t=20)
+    _dup(three, 0, 2)
+    _dup(three, 0, 3, jitter=0.005, seed=1)   # two copies of one player: both go
+    assert duplicate_tracks(three, 0.05).tolist() == [False, False, True, True]
+    gone = _walk(n_players=3, t=20)
+    _dup(gone, 0, 1)
+    gone[4, 0] = np.nan                       # the original is not fully observed: nothing to copy
+    assert not duplicate_tracks(gone, 0.05).any()
+
+
+def test_duplicate_tracks_are_never_kept_and_are_counted():
+    """SportVU 0021500368 segment 12: 10 ids, one player twice -> 9 players, rejected for
+    N = 10; with 12 ids the clip keeps 10 distinct players."""
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _dup(_walk(n_players=12, t=20), 2, 9, jitter=0.01)
+    for seed in range(20):
+        dropped, why = {}, {}
+        out = apply_controls(_clip(xy), cfg, np.random.default_rng(seed), reasons=why,
+                             dropped=dropped)
+        assert out is not None and why == {}
+        assert dropped == {"duplicate_tracks": 1, "clips_with_duplicate": 1}
+        scale = out.meta["space_scale"]
+        d = pair_max_distance(out.xy) * scale
+        assert (d[np.triu_indices(10, 1)] > 0.05).all()
+        assert any(c["name"] == "drop_duplicates" and c["n"] == 1 for c in out.meta["controls"])
+    ten = _dup(_walk(n_players=10, t=20), 1, 2)
+    dropped, why = {}, {}
+    assert apply_controls(_clip(ten), cfg, np.random.default_rng(0), reasons=why,
+                          dropped=dropped) is None
+    assert why == {"players": 1}
+    assert dropped == {"duplicate_tracks": 1, "clips_with_duplicate": 1,
+                       "clips_rejected_after_duplicate": 1}
+
+
+def test_duplicates_only_over_the_window_count():
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _walk(n_players=11, t=24)            # window = frames 2..21
+    xy[2:22, 10] = xy[2:22, 0]                # a copy inside the window, apart outside it
+    d = {}
+    assert select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d).n_players == 10
+    assert d == {"duplicate_tracks": 1, "clips_with_duplicate": 1}
+    xy = _walk(n_players=11, t=24)
+    xy[3:22, 10] = xy[3:22, 0]                # apart at frame 2, inside the window
+    d = {}
+    select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d)
+    assert d == {}
+
+
+def test_frozen_copies_count_as_frozen_not_as_duplicates():
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _walk(n_players=13, t=20)
+    xy[:, 11] = 0.0
+    xy[:, 12] = 0.0                           # two TeamTrack (0, 0) tracks: frozen, not copies
+    d = {}
+    assert select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d).n_players == 10
+    assert d == {"frozen_tracks": 2, "clips_with_frozen": 1}
+
+
+def test_clips_without_duplicates_are_unchanged_by_the_check():
+    """Same draws and output as before D19 when no two tracks coincide (almost every clip)."""
+    xy = _walk(n_players=14, t=20)
+    on = apply_controls(_clip(xy), PRESETS["strict_smooth"], np.random.default_rng(3))
+    off = apply_controls(_clip(xy), ControlConfig(smooth=2.0, drop_duplicates=False),
+                         np.random.default_rng(3))
+    assert np.array_equal(on.xy, off.xy)
+    assert all(cfg.drop_duplicates and cfg.duplicate_tol_m == 0.05 for cfg in PRESETS.values())
+
+
+def test_drop_duplicates_off_keeps_the_copy_and_toy_clips_are_exempt():
+    xy = _dup(_walk(n_players=10, t=20), 1, 2)
+    assert apply_controls(_clip(xy), ControlConfig(n_players=10, drop_duplicates=False),
+                          np.random.default_rng(0)) is not None
+    toy = Clip(clip_id="c", sport="soccer", source="toy", match_id="m", fps=5.0, xy=xy)
+    assert apply_controls(toy, ControlConfig(n_players=10), np.random.default_rng(0)) is not None
+    assert apply_controls(_clip(xy), ControlConfig(n_players=10), np.random.default_rng(0)) is None
+
+
+# ---------------------------------------------------------------- exactly linear tracks (D19)
+
+def test_linear_tracks_need_the_whole_min_run_of_constant_velocity():
+    xy = _walk(n_players=5, t=20)                      # constant velocity: all linear
+    xy += np.random.default_rng(1).normal(0, 0.01, xy.shape).astype(np.float32)  # 1 cm noise
+    xy[:, 1] = np.linspace([0, 0], [8, 3], 20)          # interpolated over the whole window
+    xy[:, 2] = xy[0, 2]                                 # a hold is linear at zero speed
+    xy[:10, 3] = np.linspace([5, 5], [6, 7], 10)        # linear for 10 frames only
+    xy[:, 4] = np.linspace([0, 0], [8, 3], 20)
+    xy[6, 4] = np.nan                                   # not fully observed: never "linear"
+    assert linear_tracks(xy, 20).tolist() == [False, True, True, False, False]
+    assert linear_tracks(xy, 10).tolist() == [False, True, True, True, False]
+    bent = np.linspace([0, 0], [8, 3], 20)
+    bent[10:] += np.linspace([0, 0], [0.02, 0], 10)     # bends by 2 mm per step half-way
+    assert not linear_tracks(bent[:, None].astype(np.float32), 20).any()
+    far = (np.linspace([60, 40], [68, 43], 20)).astype(np.float32)  # float32 at pitch scale
+    assert linear_tracks(far[:, None], 20).all()
+
+
+def test_linear_tracks_are_dropped_counted_and_measured_clips_unchanged():
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _walk(n_players=11, t=20)
+    xy += np.random.default_rng(2).normal(0, 0.01, xy.shape).astype(np.float32)
+    lin = xy.copy()
+    lin[:, 4] = np.linspace([1, 1], [9, 4], 20)          # TeamTrack keyframe interpolation
+    dropped, why = {}, {}
+    out = apply_controls(_clip(lin), cfg, np.random.default_rng(0), reasons=why, dropped=dropped)
+    assert out is not None and dropped == {"linear_tracks": 1, "clips_with_linear": 1}
+    assert any(c["name"] == "drop_linear" and c["n"] == 1 for c in out.meta["controls"])
+    lin[:, 6] = np.linspace([3, 1], [2, 4], 20)          # a second one: 9 players left
+    dropped, why = {}, {}
+    assert apply_controls(_clip(lin), cfg, np.random.default_rng(0), reasons=why,
+                          dropped=dropped) is None
+    assert why == {"players": 1}
+    assert dropped == {"linear_tracks": 2, "clips_with_linear": 1,
+                       "clips_rejected_after_linear": 1}
+    xy14 = _walk(n_players=14, t=20)          # measured-like clip: the check changes nothing
+    on = apply_controls(_clip(xy14), PRESETS["strict_smooth"], np.random.default_rng(3))
+    off = apply_controls(_clip(xy14), ControlConfig(smooth=2.0, drop_linear=False),
+                         np.random.default_rng(3))
+    assert np.array_equal(on.xy, off.xy)
+    assert all(c.drop_linear and c.linear_min_s == 4.0 for c in PRESETS.values())
+
+
+def test_linear_min_is_in_seconds_and_counts_inside_the_window_only():
+    """At 8 s (40 frames) a 4 s straight stretch is enough; outside the window it is not."""
+    cfg = ControlConfig(n_players=10, player_mode="random", n_frames=40)
+    xy = _walk(n_players=11, t=44)                      # window = frames 2..41
+    xy += np.random.default_rng(3).normal(0, 0.01, xy.shape).astype(np.float32)
+    xy[20:40, 0] = np.linspace([1, 1], [5, 2], 20)      # 4 s straight, inside the window
+    d = {}
+    assert select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d).n_players == 10
+    assert d == {"linear_tracks": 1, "clips_with_linear": 1}
+    xy = _walk(n_players=11, t=44)
+    xy += np.random.default_rng(3).normal(0, 0.01, xy.shape).astype(np.float32)
+    xy[:21, 0] = np.linspace([1, 1], [5, 2], 21)        # 21 frames straight, 2 of them outside
+    d = {}
+    select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d)
+    assert d == {}

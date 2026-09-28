@@ -11,6 +11,8 @@ Each control targets one named shortcut (see docs/design.md, "Fugas"):
 | (team dropped)       | team structure given for free instead of inferred           |
 | max_step_speed       | tracker teleports (ID swaps, lost tracks) as a source cue   |
 | frozen_tracks        | placeholder tracks (a held or (0,0) value) shown as players |
+| linear_tracks        | interpolated stretches (a straight line at constant speed)  |
+| duplicate_tracks     | one player under two ids, drawn as two dots on one spot     |
 
 Controls are pure functions Clip -> Clip (or None when a clip cannot satisfy the
 control, e.g. has fewer fully observed players than N). Whatever they do is
@@ -111,6 +113,94 @@ def drop_frozen(clip: Clip, span: slice) -> tuple[Clip, int]:
     xy = clip.xy.copy()
     xy[:, fr] = np.nan
     return _log(clip.replace(xy=xy), "drop_frozen", n=int(fr.sum())), int(fr.sum())
+
+
+LINEAR_TOL_M = 1e-4  # metres per frame^2 (0.1 mm): float32 rounding is ~1e-5 (D19)
+LINEAR_MIN_S = 4.0   # seconds: no measured track in five sources is this linear (D19)
+
+
+def linear_tracks(xy: np.ndarray, min_frames: int, tol_m: float = LINEAR_TOL_M) -> np.ndarray:
+    """[N] True for fully observed tracks of `xy` [T, N, 2] that move in an exactly straight
+    line at constant speed (|second difference| < `tol_m` in both axes; standing still
+    included) for at least `min_frames` consecutive frames. A measured player always has
+    millimetres to centimetres of second difference per step (noise, acceleration), so
+    such a stretch is an interpolation between annotated keyframes (TeamTrack) or a held
+    value, not a measurement: the stretch is missing, and the track cannot be kept."""
+    n = xy.shape[1]
+    need = max(int(min_frames) - 2, 1)  # consecutive flat second differences
+    if xy.shape[0] < need + 2:
+        return np.zeros(n, bool)
+    full = ~np.isnan(xy).any(axis=(0, 2))
+    flat = (np.abs(np.diff(xy.astype(np.float64), 2, axis=0)) < tol_m).all(axis=2)  # [T-2, N]
+    out = np.zeros(n, bool)
+    for j in np.flatnonzero(full):
+        run = 0
+        for f in flat[:, j]:
+            run = run + 1 if f else 0
+            if run >= need:
+                out[j] = True
+                break
+    return out
+
+
+def drop_linear(clip: Clip, span: slice, min_s: float = LINEAR_MIN_S,
+                tol_m: float = LINEAR_TOL_M) -> tuple[Clip, int]:
+    """Mark as unobserved (NaN) every track with an exactly linear stretch of at least
+    `min_s` seconds over `span` (`linear_tracks`). -> (clip, number of tracks dropped)."""
+    lin = linear_tracks(clip.xy[span], int(round(min_s * clip.fps)), tol_m)
+    if not lin.any():
+        return clip, 0
+    xy = clip.xy.copy()
+    xy[:, lin] = np.nan
+    return (_log(clip.replace(xy=xy), "drop_linear", n=int(lin.sum()), min_s=min_s),
+            int(lin.sum()))
+
+
+DUPLICATE_TOL_M = 0.05  # metres: see D19 for the evidence
+
+
+def pair_max_distance(xy: np.ndarray) -> np.ndarray:
+    """[N, N] largest distance between tracks i and j over all frames of `xy` [T, N, 2]
+    (how far apart the pair ever gets in the window); inf on the diagonal and for any
+    track that is not fully observed."""
+    n = xy.shape[1]
+    full = ~np.isnan(xy).any(axis=(0, 2))
+    out = np.full((n, n), np.inf)
+    idx = np.flatnonzero(full)
+    if len(idx) >= 2:
+        f = xy[:, idx].astype(np.float64)
+        d = np.linalg.norm(f[:, :, None] - f[:, None, :], axis=-1).max(axis=0)
+        np.fill_diagonal(d, np.inf)
+        out[np.ix_(idx, idx)] = d
+    return out
+
+
+def duplicate_tracks(xy: np.ndarray, tol_m: float) -> np.ndarray:
+    """[N] True for each fully observed track that stays within `tol_m` of a lower-index
+    kept track over all frames of `xy` [T, N, 2]. Two measured players never stay within
+    a few centimetres of each other for seconds (bodies, and the evidence in D19), so such
+    a pair is one player under two ids (e.g. SportVU game 0021500368, segment 12). The
+    lower index is kept; with several copies, every copy of a kept track goes, so no two
+    kept tracks stay within `tol_m`."""
+    d = pair_max_distance(xy)
+    dup = np.zeros(xy.shape[1], bool)
+    for j in range(xy.shape[1]):
+        near = np.flatnonzero(d[:j, j] <= tol_m)
+        if len(near) and (~dup[near]).any():
+            dup[j] = True
+    return dup
+
+
+def drop_duplicates(clip: Clip, span: slice, tol_m: float) -> tuple[Clip, int]:
+    """Mark as unobserved (NaN) every track that duplicates a lower-index track over
+    `span` (`duplicate_tracks`). -> (clip, number of tracks dropped)."""
+    dup = duplicate_tracks(clip.xy[span], tol_m)
+    if not dup.any():
+        return clip, 0
+    xy = clip.xy.copy()
+    xy[:, dup] = np.nan
+    return (_log(clip.replace(xy=xy), "drop_duplicates", n=int(dup.sum()), tol_m=tol_m),
+            int(dup.sum()))
 
 
 def normalize_space(clip: Clip, mode: str = "spread") -> Clip:
@@ -228,6 +318,17 @@ class ControlConfig:
     # (held / placeholder values, e.g. TeamTrack's missing detections at (0, 0)); they are
     # dropped before choosing the N kept players (D18).
     drop_frozen: bool = True
+    # Two tracks that stay within `duplicate_tol_m` metres of each other over the whole
+    # window (their largest distance, not the mean) are one player under two ids (SportVU,
+    # Metrica); the higher-index copy is dropped before choosing the N kept players (D19).
+    # A track that moves in an exactly straight line at constant speed (standing still
+    # included) for >= `linear_min_s` seconds of the window is interpolated there, not
+    # measured (TeamTrack's keyframe annotations): the stretch is missing and the track
+    # cannot be kept (D19). In a 4 s window that is the whole window.
+    drop_linear: bool = True
+    linear_min_s: float = LINEAR_MIN_S
+    drop_duplicates: bool = True
+    duplicate_tol_m: float = DUPLICATE_TOL_M
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -255,27 +356,47 @@ REJECT_REASONS = ("players", "teleport", "window")
 def select_players(clip: Clip, cfg: ControlConfig, rng: np.random.Generator,
                    reasons: dict | None = None, dropped: dict | None = None) -> Clip | None:
     """First step of `apply_controls`: fill short gaps, drop frozen tracks (if
-    `cfg.drop_frozen`), keep N fully observed players. Same draws from `rng` as
-    `apply_controls`, so an audit can replay which players a prepared clip kept.
-    `dropped` (a Counter), if given, gets the frozen tracks removed ("frozen_tracks"),
-    the clips that had any ("clips_with_frozen") and, of those, the clips then rejected
-    for too few players ("clips_rejected_after_frozen")."""
+    `cfg.drop_frozen`), exactly linear tracks (if `cfg.drop_linear`) and duplicated tracks
+    (if `cfg.drop_duplicates`), keep N fully observed players. Same draws from `rng` as `apply_controls`, so an audit can replay
+    which players a prepared clip kept. `dropped` (a Counter), if given, gets the frozen
+    tracks removed ("frozen_tracks"), the clips that had any ("clips_with_frozen") and, of
+    those, the clips then rejected for too few players ("clips_rejected_after_frozen");
+    likewise "linear_tracks", "clips_with_linear", "clips_rejected_after_linear" and
+    "duplicate_tracks", "clips_with_duplicate", "clips_rejected_after_duplicate"."""
+    def count(key: str, n: int = 1) -> None:
+        if dropped is not None:
+            dropped[key] = dropped.get(key, 0) + n
+
     c: Clip = fill_short_gaps(clip)
-    n_frozen = 0
-    if cfg.drop_frozen and c.source != "toy":  # toy clips are synthetic, not tracking
-        span = window_span(c.n_frames, cfg.n_frames if cfg.tempo is None else None)
+    n_frozen = n_lin = n_dup = 0
+    tracking = c.source != "toy"  # toy clips are synthetic, not tracking
+    span = window_span(c.n_frames, cfg.n_frames if cfg.tempo is None else None)
+    if cfg.drop_frozen and tracking:
         c, n_frozen = drop_frozen(c, span)
-        if dropped is not None and n_frozen:
-            dropped["frozen_tracks"] = dropped.get("frozen_tracks", 0) + n_frozen
-            dropped["clips_with_frozen"] = dropped.get("clips_with_frozen", 0) + 1
+        if n_frozen:
+            count("frozen_tracks", n_frozen)
+            count("clips_with_frozen")
+    if cfg.drop_linear and tracking:
+        c, n_lin = drop_linear(c, span, cfg.linear_min_s)
+        if n_lin:
+            count("linear_tracks", n_lin)
+            count("clips_with_linear")
+    if cfg.drop_duplicates and tracking:
+        c, n_dup = drop_duplicates(c, span, cfg.duplicate_tol_m)
+        if n_dup:
+            count("duplicate_tracks", n_dup)
+            count("clips_with_duplicate")
     if cfg.n_players:
         out = fix_player_count(c, cfg.n_players, rng, cfg.player_mode)
         if out is None:
             if reasons is not None:
                 reasons["players"] = reasons.get("players", 0) + 1
-            if dropped is not None and n_frozen:
-                dropped["clips_rejected_after_frozen"] = \
-                    dropped.get("clips_rejected_after_frozen", 0) + 1
+            if n_frozen:
+                count("clips_rejected_after_frozen")
+            if n_lin:
+                count("clips_rejected_after_linear")
+            if n_dup:
+                count("clips_rejected_after_duplicate")
             return None
         return out
     # still drop players that are not fully observed
@@ -287,8 +408,8 @@ def apply_controls(clip: Clip, cfg: ControlConfig, rng: np.random.Generator,
                    reasons: dict | None = None, dropped: dict | None = None) -> Clip | None:
     """Clip -> controlled clip, or None. `reasons` (a Counter), if given, gets +1 under
     the reason of a rejection: "players" (fewer than N fully observed, after dropping
-    frozen tracks), "teleport" (a kept player's step exceeds `max_speed_ms`) or "window"
-    (too short for the window or the tempo target). `dropped`: see `select_players`."""
+    frozen, linear and duplicated tracks), "teleport" (a kept player's step exceeds
+    `max_speed_ms`) or "window" (too short for the window or the tempo target). `dropped`: see `select_players`."""
     def reject(why: str) -> None:
         if reasons is not None:
             reasons[why] = reasons.get(why, 0) + 1

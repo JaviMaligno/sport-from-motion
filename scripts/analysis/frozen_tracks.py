@@ -75,6 +75,8 @@ def audit_items(items: pathlib.Path, pool: pathlib.Path | None) -> dict:
     cfg = json.loads((items / "config.json").read_text())
     ctl = dict(cfg["controls"])
     ctl.setdefault("drop_frozen", False)  # sets prepared before D18
+    ctl.setdefault("drop_linear", False)  # sets prepared before D19
+    ctl.setdefault("drop_duplicates", False)
     ccfg = ControlConfig(**ctl)
     seed = str(cfg.get("seed", 0))
     out: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)

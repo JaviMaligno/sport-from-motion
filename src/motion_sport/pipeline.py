@@ -114,6 +114,12 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
     # frozen tracks (exactly constant over the window) dropped as non-players (D18)
     frozen_by_sport: dict[str, Counter] = defaultdict(Counter)
     frozen_by_source: dict[str, Counter] = defaultdict(Counter)
+    # one player under two ids (tracks within duplicate_tol_m over the window), copy dropped (D19)
+    dup_by_sport: dict[str, Counter] = defaultdict(Counter)
+    dup_by_source: dict[str, Counter] = defaultdict(Counter)
+    # tracks exactly linear for >= linear_min_s (interpolated, not measured), dropped (D19)
+    lin_by_sport: dict[str, Counter] = defaultdict(Counter)
+    lin_by_source: dict[str, Counter] = defaultdict(Counter)
     for clip in raw:
         rng = np.random.default_rng(stable_seed(clip.clip_id, str(seed)))
         tags = list(clip.tags)
@@ -122,8 +128,15 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
         why: Counter = Counter()
         frozen: Counter = Counter()
         c = apply_controls(clip, cfg, rng, reasons=why, dropped=frozen)
-        frozen_by_sport[clip.sport].update(frozen)
-        frozen_by_source[clip.source].update(frozen)
+        fz = Counter({k: v for k, v in frozen.items() if "frozen" in k})
+        du = Counter({k: v for k, v in frozen.items() if "duplicate" in k})
+        li = Counter({k: v for k, v in frozen.items() if "linear" in k})
+        lin_by_sport[clip.sport].update(li)
+        lin_by_source[clip.source].update(li)
+        frozen_by_sport[clip.sport].update(fz)
+        frozen_by_source[clip.source].update(fz)
+        dup_by_sport[clip.sport].update(du)
+        dup_by_source[clip.source].update(du)
         if c is None:
             rejected_by_sport[clip.sport].update(why)
             rejected_by_source[clip.source].update(why)
@@ -233,6 +246,15 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
         # clips_rejected_after_frozen (also counted under "players"); every source listed
         "frozen_dropped_by_sport": {k: dict(frozen_by_sport[k]) for k in sorted(in_by_sport)},
         "frozen_dropped_by_source": {k: dict(frozen_by_source[k]) for k in sorted(in_by_source)},
+        # duplicated tracks (one player under two ids) dropped before choosing the players:
+        # duplicate_tracks, clips_with_duplicate, clips_rejected_after_duplicate (also under
+        # "players"); every source listed
+        "duplicate_dropped_by_sport": {k: dict(dup_by_sport[k]) for k in sorted(in_by_sport)},
+        "duplicate_dropped_by_source": {k: dict(dup_by_source[k]) for k in sorted(in_by_source)},
+        # exactly linear tracks (interpolated for >= linear_min_s) dropped before choosing the
+        # players: linear_tracks, clips_with_linear, clips_rejected_after_linear
+        "linear_dropped_by_sport": {k: dict(lin_by_sport[k]) for k in sorted(in_by_sport)},
+        "linear_dropped_by_source": {k: dict(lin_by_source[k]) for k in sorted(in_by_source)},
     }, indent=2))
     return out
 

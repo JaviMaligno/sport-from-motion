@@ -257,7 +257,8 @@ def _final_like(tmp_path, *, controls=None, af_tags=("mid_play", "random_phase")
     sports = ["american_football", "basketball", "handball", "soccer"]
     ctrl = {"n_players": 10, "player_mode": "random", "space": "spread", "rotate": True,
             "tempo": None, "n_frames": 20, "drop_team": True, "smooth": 2.0, "max_speed_ms": 12.0,
-            "drop_frozen": True}
+            "drop_frozen": True, "drop_linear": True, "linear_min_s": 4.0,
+            "drop_duplicates": True, "duplicate_tol_m": 0.05}
     ctrl.update(controls or {})
     (root / "config.json").write_text(json.dumps({
         "preset": preset, "controls": ctrl, "candidates": list(candidates or sports),
@@ -298,6 +299,18 @@ def test_preflight_accepts_the_preregistered_set(tmp_path):
     ({"controls": {"drop_frozen": False}}, "controls.drop_frozen is False, pre-registered True"),
     ({"controls": {"drop_frozen": None}}, "controls.drop_frozen is None"),
     ({"controls": {"drop_frozen": 1}}, "controls.drop_frozen is 1"),
+    # D19: one player under two ids is one player
+    ({"controls": {"drop_duplicates": False}},
+     "controls.drop_duplicates is False, pre-registered True (D19)"),
+    ({"controls": {"drop_duplicates": None}}, "controls.drop_duplicates is None"),
+    ({"controls": {"drop_duplicates": 1}}, "controls.drop_duplicates is 1"),
+    ({"controls": {"duplicate_tol_m": 0.1}}, "controls.duplicate_tol_m is 0.1, pre-registered 0.05"),
+    ({"controls": {"duplicate_tol_m": None}}, "controls.duplicate_tol_m is None"),
+    ({"controls": {"duplicate_tol_m": True}}, "controls.duplicate_tol_m is True"),
+    ({"controls": {"drop_linear": False}}, "controls.drop_linear is False, pre-registered True (D19)"),
+    ({"controls": {"drop_linear": None}}, "controls.drop_linear is None"),
+    ({"controls": {"linear_min_s": 2.0}}, "controls.linear_min_s is 2.0, pre-registered 4.0 (D19)"),
+    ({"controls": {"linear_min_s": True}}, "controls.linear_min_s is True"),
     ({"candidates": ["american_football", "basketball", "handball", "soccer", "rugby_union"]},
      "candidates are"),
     ({"candidates": ["basketball", "handball", "soccer"]}, "candidates are"),
@@ -328,15 +341,49 @@ def test_preflight_rejects_a_kept_player_that_never_moves(tmp_path, which):
     rng = np.random.default_rng(0)
     moving = rng.normal(size=(20, 10, 2)).astype(np.float32)
     Clip(clip_id="ok", sport="soccer", source="metrica", match_id="m", fps=5.0,
-         xy=moving).save(root / "clips")
+         xy=moving, meta={"space_scale": 5.0}).save(root / "clips")
     assert check() == []
     frozen = moving.copy()
     frozen[:, 3] = frozen[0, 3]  # one dot that never moves, among moving ones
     Clip(clip_id="teamtrack-x", sport="handball", source="teamtrack", match_id="m", fps=5.0,
-         xy=frozen).save(root / "clips")
+         xy=frozen, meta={"space_scale": 5.0}).save(root / "clips")
     bad = check()
     assert len(bad) == 1 and bad[0].startswith("1 clips with a kept player that never moves")
     assert "teamtrack-x (1)" in bad[0]
+
+
+def test_preflight_rejects_a_set_prepared_before_d19(tmp_path):
+    root = _final_like(tmp_path)
+    cfg = json.loads((root / "config.json").read_text())
+    for k in ("drop_linear", "linear_min_s", "drop_duplicates", "duplicate_tol_m"):
+        del cfg["controls"][k]  # config.json written before D19
+    (root / "config.json").write_text(json.dumps(cfg))
+    assert _script("run_plan").preflight(root, 400, MODELS) == [
+        "controls.drop_linear is None, pre-registered True (D19)",
+        "controls.linear_min_s is None, pre-registered 4.0 (D19)",
+        "controls.drop_duplicates is None, pre-registered True (D19)",
+        "controls.duplicate_tol_m is None, pre-registered 0.05 (D19)"]
+
+
+@pytest.mark.parametrize("which", ["final", "a7b"])
+def test_preflight_rejects_two_kept_players_within_5_cm(tmp_path, which):
+    """D19: checked on the prepared clips in metres (post-control units x space_scale)."""
+    rp = _script("run_plan")
+    root = _final_like(tmp_path) if which == "final" else _d8_like(tmp_path)
+    check = (lambda: rp.preflight(root, 400, MODELS)) if which == "final" else \
+        (lambda: rp.preflight_a7b(root, 300))
+    xy = np.random.default_rng(0).normal(size=(20, 10, 2)).astype(np.float32)
+    xy[:, 7] = xy[:, 2] + [0.004, 0.0]       # 0.004 units apart every frame
+    far = Clip(clip_id="close-but-real", sport="soccer", source="metrica", match_id="m",
+               fps=5.0, xy=xy, meta={"space_scale": 20.0})  # 8 cm: two players
+    far.save(root / "clips")
+    assert check() == []
+    far.replace(clip_id="sportvu-x", sport="basketball", source="sportvu",
+                meta={"space_scale": 10.0}).save(root / "clips")  # 4 cm: one player twice
+    bad = check()
+    assert len(bad) == 1 and bad[0].startswith(
+        "1 clips with two kept players within 0.05 m over the whole window (D19)")
+    assert "sportvu-x (1)" in bad[0]
 
 
 def test_preflight_accepts_integral_values_and_skips_video_without_gemini(tmp_path):
@@ -381,7 +428,8 @@ def _d8_like(tmp_path, *, n_frames=40, candidates=("basketball", "handball", "so
     root = tmp_path / "final-d8"
     root.mkdir(parents=True)
     ctrl = {"n_players": 10, "player_mode": "random", "n_frames": n_frames, "smooth": 2.0,
-            "max_speed_ms": 12.0, "drop_frozen": True}
+            "max_speed_ms": 12.0, "drop_frozen": True, "drop_linear": True, "linear_min_s": 4.0,
+            "drop_duplicates": True, "duplicate_tol_m": 0.05}
     (root / "config.json").write_text(json.dumps({
         "preset": "strict_smooth", "controls": ctrl, "candidates": list(candidates),
         "clips_kept_by_sport": {s: 100 for s in candidates}}))

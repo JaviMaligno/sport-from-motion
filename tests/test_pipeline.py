@@ -282,7 +282,11 @@ def _walkers(tmp_path, source, n, teleport, seed):
         start = rng.uniform(0, 40, (12, 2))
         v = rng.normal(0, 1, (12, 2))
         v = v / np.linalg.norm(v, axis=1, keepdims=True) * 4.0
-        xy = start[None] + np.arange(24)[:, None, None] / 5.0 * v[None]
+        # a wide arc (radius 200 m), not an exact straight line, which only an
+        # interpolation is (D19)
+        nrm = np.stack([-v[:, 1], v[:, 0]], 1) / 4.0
+        th = (np.arange(24) / 5.0 * 4.0 / 200.0)[:, None, None]
+        xy = start[None] + 200.0 * (np.sin(th) * v[None] / 4.0 + (1 - np.cos(th)) * nrm[None])
         if i < teleport:
             xy[12:, :] += np.array([20.0, 0.0])  # everyone jumps 20 m in one 0.2 s step
         Clip(clip_id=f"{source}-{i:03d}", sport="handball", source=source,
@@ -315,6 +319,7 @@ def test_prepare_reports_rejections_per_sport_and_source(tmp_path, capsys):
                           reprs=["text"], n_players=10, max_speed_ms=200.0)
     assert json.loads((hi / "config.json").read_text())["n_clips_kept"] == 20
     assert cfg["frozen_dropped_by_source"] == {"clean": {}, "jumpy": {}}
+    assert cfg["duplicate_dropped_by_source"] == {"clean": {}, "jumpy": {}}
 
 
 def test_prepare_reports_frozen_tracks_per_source(tmp_path):
@@ -496,3 +501,41 @@ def test_exploratory_report_has_no_primary_contrast_and_no_holm(prepared, capsys
     assert "exploratory contrasts (not pre-registered; raw p):" in out
     assert "primary contrasts" not in out and "secondary contrasts" not in out
     assert "p_holm" not in out and not any(line.endswith(" *") for line in out.splitlines())
+
+
+def test_prepare_reports_duplicate_tracks_per_source(tmp_path):
+    """D19: a track that is another's copy (one player under two ids) is dropped, counted
+    per source and sport apart from the frozen ones, and no kept pair stays within 5 cm."""
+    from motion_sport.controls import pair_max_distance
+    from motion_sport.schema import Clip, load_clips
+
+    _walkers(tmp_path, "clean", 6, 0, seed=1)
+    for i in range(6):
+        p = tmp_path / "clips" / f"clean-{i:03d}.npz"
+        c = Clip.load(p)
+        xy = c.xy.copy()
+        if i < 2:
+            xy[:, 5] = xy[:, 0] + 0.01              # a copy 1 cm off: 11 real players left
+        if i == 2:
+            xy[:, 1:4] = xy[:, :1]                  # three copies of one: only 9 real players
+        if i == 3:
+            xy[:, 0] = 0.0                          # a frozen (0, 0) track, not a copy
+        p.unlink()
+        c.replace(source="sv" if i < 3 else "clean", xy=xy,
+                  clip_id=("sv" if i < 3 else "clean") + f"-{i:03d}").save(tmp_path / "clips")
+    out = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "items"), preset="strict_smooth",
+                           conditions=["motion"], reprs=["text"], n_players=10)
+    cfg = json.loads((out / "config.json").read_text())
+    assert cfg["controls"]["drop_duplicates"] is True and cfg["controls"]["duplicate_tol_m"] == 0.05
+    assert cfg["duplicate_dropped_by_source"] == {
+        "clean": {}, "sv": {"duplicate_tracks": 5, "clips_with_duplicate": 3,
+                           "clips_rejected_after_duplicate": 1}}
+    assert cfg["duplicate_dropped_by_sport"]["handball"]["duplicate_tracks"] == 5
+    assert cfg["frozen_dropped_by_source"] == {
+        "clean": {"frozen_tracks": 1, "clips_with_frozen": 1}, "sv": {}}
+    assert cfg["rejected_by_source"] == {"sv": {"players": 1}}
+    kept = load_clips(out / "clips")
+    assert len(kept) == 5
+    for c in kept:
+        d = pair_max_distance(c.xy) * c.meta["space_scale"]
+        assert (d[np.triu_indices(c.n_players, 1)] > 0.05).all()

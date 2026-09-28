@@ -113,6 +113,8 @@ def check(items_dir: str | pathlib.Path) -> list[str]:
 PREFLIGHT_CONTROLS = {"player_mode": "random", "n_players": 10, "max_speed_ms": 12.0,
                       "smooth": 2.0}
 N_FRAMES = 20  # 4 s at 5 Hz
+DUPLICATE_TOL_M = 0.05  # metres: two kept tracks this close over the whole window = one player (D19)
+LINEAR_MIN_S = 4.0  # seconds of exactly straight, constant-speed motion = interpolated (D19)
 CANDIDATES = ["american_football", "basketball", "handball", "soccer"]
 
 
@@ -126,6 +128,22 @@ def _controls(cfg: dict, pinned: dict) -> list[str]:
     if controls.get("drop_frozen") is not True:
         bad.append(f"controls.drop_frozen is {controls.get('drop_frozen')!r}, pre-registered "
                    "True (D18)")
+    # a track exactly linear for >= 4 s is interpolated there, not measured (D19); checked on
+    # the config only: the smoothing bends the ends of a straight window, so the prepared
+    # clips cannot show it reliably (scripts/analysis/linear_tracks.py replays the raw clips)
+    if controls.get("drop_linear") is not True:
+        bad.append(f"controls.drop_linear is {controls.get('drop_linear')!r}, pre-registered "
+                   "True (D19)")
+    lmin = controls.get("linear_min_s")
+    if type(lmin) is bool or lmin != LINEAR_MIN_S:
+        bad.append(f"controls.linear_min_s is {lmin!r}, pre-registered {LINEAR_MIN_S!r} (D19)")
+    # one player under two ids (two tracks within 5 cm over the whole window) is one player (D19)
+    if controls.get("drop_duplicates") is not True:
+        bad.append(f"controls.drop_duplicates is {controls.get('drop_duplicates')!r}, "
+                   "pre-registered True (D19)")
+    tol = controls.get("duplicate_tol_m")
+    if type(tol) is bool or tol != DUPLICATE_TOL_M:
+        bad.append(f"controls.duplicate_tol_m is {tol!r}, pre-registered {DUPLICATE_TOL_M!r} (D19)")
     return bad
 
 
@@ -148,6 +166,32 @@ def _still_players(root: pathlib.Path) -> list[str]:
     return [f"{len(hits)} clips with a kept player that never moves (D18): {hits[:5]}"] if hits else []
 
 
+def _duplicate_players(root: pathlib.Path) -> list[str]:
+    """Kept pairs of players that stay within DUPLICATE_TOL_M metres of each other over the
+    whole window in the prepared clips (one player under two ids that reached the set).
+    Distances are post-control units x the clip's `space_scale` (rotation keeps them; the
+    smoothing can only bring a pair closer, never push a copy apart). Checked on the data,
+    not only on the config (D19)."""
+    import numpy as np
+
+    from motion_sport.controls import pair_max_distance
+    from motion_sport.schema import Clip
+
+    hits = []
+    for p in sorted((root / "clips").glob("*.npz")):
+        c = Clip.load(p)
+        scale = c.meta.get("space_scale")
+        if not scale:
+            hits.append(f"{c.clip_id} (no space_scale)")
+            continue
+        d = pair_max_distance(c.xy) * float(scale)
+        k = int((d[np.triu_indices(c.n_players, 1)] <= DUPLICATE_TOL_M).sum())
+        if k:
+            hits.append(f"{c.clip_id} ({k})")
+    return ([f"{len(hits)} clips with two kept players within {DUPLICATE_TOL_M} m over the whole "
+             f"window (D19): {hits[:5]}"] if hits else [])
+
+
 def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[str]:
     """-> the reasons the items are not the pre-registered set ([] = ok)."""
     root = pathlib.Path(items_dir)
@@ -157,6 +201,7 @@ def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
     bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": N_FRAMES})
     bad += _still_players(root)
+    bad += _duplicate_players(root)
     if sorted(cfg.get("candidates") or []) != CANDIDATES:
         bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {CANDIDATES}")
     per = n // len(cfg["candidates"])
@@ -206,6 +251,7 @@ def preflight_a7b(items_dir: str | pathlib.Path, n: int) -> list[str]:
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
     bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": A7B_N_FRAMES})
     bad += _still_players(root)
+    bad += _duplicate_players(root)
     if sorted(cfg.get("candidates") or []) != A7B_CANDIDATES:
         bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {A7B_CANDIDATES}")
     per = n // len(A7B_CANDIDATES)
