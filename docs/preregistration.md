@@ -1342,6 +1342,39 @@ Es la primera en el tiempo: va entre el pre-registro y D1.
   respondido sobre ningún conjunto final. La corrección se decide por lo que dicen los
   datos de seguimiento y los datos crudos, no por resultados.
 
+
+### D20 (2026-09-28). Decisión sobre A16 y matices de D19, antes de lanzar
+
+Sin datos de ningún modelo en `runs/final` ni en `runs/final-d8` (solo especialistas).
+
+- **A16 (coincidencias parciales de dos pistas): no se aplica ninguna regla nueva.** Contando
+  todos los pares del pool, no solo los conservados, el máximo de fotogramas a ≤ 5 cm es 6 de 20
+  en los 400 primeros y 9 de 40 en los 300 de A7b. Una regla de «la mitad de la ventana o más»
+  no cambiaría ningún clip que vean los modelos. Solo tocaría 6 clips de `runs/final` fuera de
+  los 400 (985, 1023, 1135, 1261, 1439, 1460) y 3 de `runs/final-d8` fuera de los 300. Como los
+  especialistas se comparan con los modelos sobre los mismos 400 clips (D4), no afecta a
+  ninguna comparación pre-registrada.
+- **Fusiones breves que quedan dentro de la muestra.** En SportVU y Metrica hay pares a 0,0 m
+  durante 1 a 6 fotogramas (16 pares en 7 clips de los 400: posiciones 77, 97, 193, 265, 295,
+  297 y 301; en A7b, 4 de los 300, hasta 9 de 40 fotogramas). En esos fotogramas el modelo ve
+  dos jugadores en un solo punto. Es el comportamiento de fusión del tracker cuando dos
+  jugadores están en contacto. Es breve, casi solo en baloncesto, y aparece igual en las dos
+  condiciones de cada contraste emparejado.
+- **Matiz a la evidencia de D19 sobre tramos rectos.** La tolerancia de 0,1 mm está por debajo
+  del cuanto de coordenadas de NFL (9,14 mm), SkillCorner (10 mm), EIGD (1 mm) y Metrica (~1 mm).
+  Por eso el «0 de 434.859 pistas rectas fuera de TeamTrack» es un artefacto de la prueba, no
+  una evidencia. Con una tolerancia igual para todas (4 mm, en movimiento), el 0,55 % de las
+  pistas de Metrica son rectas durante los 4 s, probablemente estimaciones fuera de cámara;
+  SportVU y EIGD dan 0 %. En los 400 primeros ninguna pista conservada es recta a 4 mm toda la
+  ventana. En A7b, la posición 26 (`metrica-Sample_Game_1-00452`) conserva 2 pistas rectas los
+  8 s. Son jugadores reales con posición estimada, no fantasmas, y A7b es exploratoria.
+- **Tiempo entre instantáneas.** El prompt de hoja y de texto dice «0,5 s». Con 8 instantáneas
+  sobre 20 fotogramas a 5 Hz, el paso alterna entre 0,4 y 0,6 s (media 0,5). No se cambia el
+  prompt: rehacer los ítems solo por esto no compensa, el paso es el mismo en todos los
+  deportes y condiciones, y queda anotado aquí.
+- **Errata:** `gaps.md` C4 citaba `runs/final2-xs` para el 0,95 del conjunto final; es
+  `runs/final5-xs`.
+
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 
 La semianchura del IC al 95 % de los contrastes primarios fue de 0,04 a 0,10 (EE ≈
