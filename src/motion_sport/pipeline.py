@@ -111,13 +111,19 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
     items, kept, kept_by_sport, kept_by_source = [], 0, Counter(), Counter()
     rejected_by_sport: dict[str, Counter] = defaultdict(Counter)
     rejected_by_source: dict[str, Counter] = defaultdict(Counter)
+    # frozen tracks (exactly constant over the window) dropped as non-players (D18)
+    frozen_by_sport: dict[str, Counter] = defaultdict(Counter)
+    frozen_by_source: dict[str, Counter] = defaultdict(Counter)
     for clip in raw:
         rng = np.random.default_rng(stable_seed(clip.clip_id, str(seed)))
         tags = list(clip.tags)
         if median_speed(clip) < STATIC_SPEED_MS and clip.source != "toy":
             tags.append("static")  # computed in metres, before any rescaling
         why: Counter = Counter()
-        c = apply_controls(clip, cfg, rng, reasons=why)
+        frozen: Counter = Counter()
+        c = apply_controls(clip, cfg, rng, reasons=why, dropped=frozen)
+        frozen_by_sport[clip.sport].update(frozen)
+        frozen_by_source[clip.source].update(frozen)
         if c is None:
             rejected_by_sport[clip.sport].update(why)
             rejected_by_source[clip.source].update(why)
@@ -223,6 +229,10 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
         # rejections by reason (players / teleport / window), per sport and per source
         "rejected_by_sport": {k: dict(v) for k, v in sorted(rejected_by_sport.items())},
         "rejected_by_source": {k: dict(v) for k, v in sorted(rejected_by_source.items())},
+        # frozen tracks dropped before choosing the players: frozen_tracks, clips_with_frozen,
+        # clips_rejected_after_frozen (also counted under "players"); every source listed
+        "frozen_dropped_by_sport": {k: dict(frozen_by_sport[k]) for k in sorted(in_by_sport)},
+        "frozen_dropped_by_source": {k: dict(frozen_by_source[k]) for k in sorted(in_by_source)},
     }, indent=2))
     return out
 

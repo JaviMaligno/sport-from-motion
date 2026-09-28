@@ -314,6 +314,38 @@ def test_prepare_reports_rejections_per_sport_and_source(tmp_path, capsys):
     hi = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "hi"), conditions=["motion"],
                           reprs=["text"], n_players=10, max_speed_ms=200.0)
     assert json.loads((hi / "config.json").read_text())["n_clips_kept"] == 20
+    assert cfg["frozen_dropped_by_source"] == {"clean": {}, "jumpy": {}}
+
+
+def test_prepare_reports_frozen_tracks_per_source(tmp_path):
+    """D18: a frozen track is dropped as a non-player, counted per source and sport, and
+    never reaches a kept clip."""
+    from motion_sport.schema import Clip, load_clips
+
+    _walkers(tmp_path, "clean", 6, 0, seed=1)
+    for i in range(6):
+        p = tmp_path / "clips" / f"clean-{i:03d}.npz"
+        c = Clip.load(p)
+        xy = c.xy.copy()
+        if i < 2:
+            xy[:, 0] = 0.0                          # one (0, 0) dot: 11 real players left
+        if i == 2:
+            xy[:, :3] = xy[:1, :3]                  # three held tracks: only 9 real players
+        p.unlink()
+        c.replace(source="tt" if i < 3 else "clean", xy=xy,
+                  clip_id=("tt" if i < 3 else "clean") + f"-{i:03d}").save(tmp_path / "clips")
+    out = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "items"), preset="strict_smooth",
+                           conditions=["motion"], reprs=["text"], n_players=10)
+    cfg = json.loads((out / "config.json").read_text())
+    assert cfg["controls"]["drop_frozen"] is True
+    assert cfg["frozen_dropped_by_source"] == {
+        "clean": {}, "tt": {"frozen_tracks": 5, "clips_with_frozen": 3,
+                           "clips_rejected_after_frozen": 1}}
+    assert cfg["frozen_dropped_by_sport"]["handball"]["frozen_tracks"] == 5
+    assert cfg["rejected_by_source"] == {"tt": {"players": 1}}
+    kept = load_clips(out / "clips")
+    assert len(kept) == 5
+    assert all((np.ptp(c.xy, axis=0).max(axis=1) > 1e-3).all() for c in kept)
 
 
 def _boom(model_id, req):

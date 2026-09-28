@@ -118,10 +118,34 @@ CANDIDATES = ["american_football", "basketball", "handball", "soccer"]
 
 def _controls(cfg: dict, pinned: dict) -> list[str]:
     controls = cfg.get("controls") or cfg.get("control_config") or {}
-    return [f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}"
-            for key, want in pinned.items()
-            # exact: 12 == 12.0 is fine, None / 0 / 15.0 / True are not
-            if type(controls.get(key)) is bool or controls.get(key) != want]
+    bad = [f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}"
+           for key, want in pinned.items()
+           # exact: 12 == 12.0 is fine, None / 0 / 15.0 / True are not
+           if type(controls.get(key)) is bool or controls.get(key) != want]
+    # frozen tracks (exactly constant, e.g. TeamTrack's missing (0, 0)) are not players (D18)
+    if controls.get("drop_frozen") is not True:
+        bad.append(f"controls.drop_frozen is {controls.get('drop_frozen')!r}, pre-registered "
+                   "True (D18)")
+    return bad
+
+
+STILL_TOL = 1e-6  # post-control units (unit spread); a moving player is ~1e-2 or more
+
+
+def _still_players(root: pathlib.Path) -> list[str]:
+    """Kept players that never move in the prepared clips (a frozen or placeholder track
+    that reached the set). Checked on the data, not only on the config (D18)."""
+    import numpy as np
+
+    from motion_sport.schema import Clip
+
+    hits = []
+    for p in sorted((root / "clips").glob("*.npz")):
+        c = Clip.load(p)
+        k = int((np.ptp(c.xy, axis=0).max(axis=1) < STILL_TOL).sum())
+        if k:
+            hits.append(f"{c.clip_id} ({k})")
+    return [f"{len(hits)} clips with a kept player that never moves (D18): {hits[:5]}"] if hits else []
 
 
 def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[str]:
@@ -132,6 +156,7 @@ def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[
     if cfg.get("preset") != "strict_smooth":
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
     bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": N_FRAMES})
+    bad += _still_players(root)
     if sorted(cfg.get("candidates") or []) != CANDIDATES:
         bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {CANDIDATES}")
     per = n // len(cfg["candidates"])
@@ -180,6 +205,7 @@ def preflight_a7b(items_dir: str | pathlib.Path, n: int) -> list[str]:
     if cfg.get("preset") != "strict_smooth":
         bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
     bad += _controls(cfg, {**PREFLIGHT_CONTROLS, "n_frames": A7B_N_FRAMES})
+    bad += _still_players(root)
     if sorted(cfg.get("candidates") or []) != A7B_CANDIDATES:
         bad.append(f"candidates are {cfg.get('candidates')}, pre-registered {A7B_CANDIDATES}")
     per = n // len(A7B_CANDIDATES)

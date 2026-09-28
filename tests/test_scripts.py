@@ -41,6 +41,76 @@ def test_long_csv_keeps_hyphenated_match_ids_with_group_extra(tmp_path):
     assert clips[0].clip_id == "teamtrack-tt-handball-train-1st_fisheye_0-30-00000"
 
 
+def test_teamtrack_missing_zero_becomes_nan():
+    tt = _script("teamtrack_to_long_csv")
+    xy = np.array([[0.0, 0.0, 1.0, 2.0, 0.0, 3.0],     # player 0 missing; x = 0 alone is real
+                   [5.0, 0.0, 0.0, 0.0, 4.0, 4.0]])    # y = 0 alone is real; player 1 missing
+    out = tt.mask_missing(xy)
+    assert np.isnan(out[0, :2]).all() and np.isnan(out[1, 2:4]).all()
+    assert out[0, 2:].tolist() == [1.0, 2.0, 0.0, 3.0] and out[1, [0, 1, 4, 5]].tolist() == [5, 0, 4, 4]
+    assert xy[0, 0] == 0.0  # input untouched
+
+
+def test_teamtrack_missing_rows_read_back_as_unobserved(tmp_path):
+    """A (0, 0) track written as NaN by the converter is not a candidate player after ingest."""
+    tt = _script("teamtrack_to_long_csv")
+    rows = ["match_id,segment,frame,track_id,x,y"]
+    for f in range(25):
+        xy = np.array([[t + 0.3 * f, t * 0.5 + 0.1 * f] for t in range(10)] + [[0.0, 0.0]]).ravel()
+        xy = tt.mask_missing(xy[None])[0]
+        rows += [f"tt-handball,train-a,{f},{t},{xy[2 * t]},{xy[2 * t + 1]}" for t in range(11)]
+    (tmp_path / "h.csv").write_text("\n".join(rows))
+    clips = list(load_long_csv(tmp_path / "h.csv", sport="handball", source="teamtrack", fps=5,
+                               clip_seconds=4, stride_seconds=4, group_extra=["segment"]))
+    assert len(clips) == 1 and clips[0].n_players == 10  # never-seen track dropped at ingest
+    assert not ((clips[0].xy[..., 0] == 0) & (clips[0].xy[..., 1] == 0)).any()
+
+
+def test_teamtrack_cache_file_list(tmp_path):
+    tt = _script("teamtrack_to_long_csv")
+    for rel in ("Handball/train/1st_fisheye_0-30_0.txt", "Soccer/val/F_1_0000_0030_20.txt"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("0")
+    assert tt.cache_file_list(tmp_path) == [
+        "teamtrack-trajectory/Handball/train/1st_fisheye_0-30_0.txt",
+        "teamtrack-trajectory/Soccer/val/F_1_0000_0030_20.txt"]
+
+
+def test_mask_teamtrack_zeros_writes_copies_and_repoints_only_teamtrack(tmp_path):
+    mz = _script("mask_teamtrack_zeros")
+    src, old, fixed, new = (tmp_path / d for d in ("clips", "pool", "fixed", "pool2"))
+    xy = np.arange(1, 41, dtype=np.float32).reshape(4, 5, 2)
+    tt = xy.copy()
+    tt[:, 2] = 0.0          # a whole-window (0, 0) track
+    tt[1, 4] = 0.0          # one missing point
+    tt[2, 0, 0] = 0.0       # x = 0 alone is a position
+    Clip(clip_id="teamtrack-1st-a", sport="handball", source="teamtrack", match_id="tt-handball",
+         fps=5.0, xy=tt, tags=["t"], meta={"start_frame": 3}).save(src)
+    Clip(clip_id="eigd-x", sport="handball", source="eigd", match_id="g", fps=5.0,
+         xy=np.zeros((4, 5, 2), np.float32)).save(src)
+    old.mkdir()
+    for p in sorted(src.glob("*.npz")):
+        os.symlink(p, old / p.name)
+    before = {p.name: p.read_bytes() for p in src.glob("*.npz")}
+    counts = mz.rebuild(old, fixed, new)
+    assert counts["teamtrack"] == 1 and counts["points_masked"] == 5 and counts["clips"] == 2
+    assert counts["by_sport"] == {"handball": {"clips": 1, "with_zero": 1, "points": 5}}
+    assert {p.name: p.read_bytes() for p in src.glob("*.npz")} == before  # sources intact
+    assert os.path.realpath(new / "teamtrack-1st-a.npz") == str((fixed / "teamtrack-1st-a.npz").resolve())
+    assert os.path.realpath(new / "eigd-x.npz") == str((src / "eigd-x.npz").resolve())
+    got = {c.clip_id: c for c in load_clips(new)}
+    a = got["teamtrack-1st-a"]
+    assert np.isnan(a.xy[:, 2]).all() and np.isnan(a.xy[1, 4]).all()
+    assert a.xy[2, 0, 0] == 0.0 and a.xy[2, 0, 1] == tt[2, 0, 1]
+    keep = ~np.isnan(a.xy)
+    assert np.array_equal(a.xy[keep], tt[keep])
+    assert (a.clip_id, a.match_id, a.tags) == ("teamtrack-1st-a", "tt-handball", ["t"])
+    assert a.meta == {"start_frame": 3, "missing_zero_masked": 5}
+    assert (got["eigd-x"].xy == 0).all()  # only TeamTrack is touched
+    with pytest.raises(SystemExit):
+        mz.rebuild(old, fixed, new)  # never over an existing pool
+
+
 def _tt_clip(cid, match, sport="handball"):
     return Clip(clip_id=cid, sport=sport, source="teamtrack", match_id=match, fps=5.0,
                 xy=np.arange(40, dtype=np.float32).reshape(4, 5, 2), tags=["x"],
@@ -186,7 +256,8 @@ def _final_like(tmp_path, *, controls=None, af_tags=("mid_play", "random_phase")
     root.mkdir()
     sports = ["american_football", "basketball", "handball", "soccer"]
     ctrl = {"n_players": 10, "player_mode": "random", "space": "spread", "rotate": True,
-            "tempo": None, "n_frames": 20, "drop_team": True, "smooth": 2.0, "max_speed_ms": 12.0}
+            "tempo": None, "n_frames": 20, "drop_team": True, "smooth": 2.0, "max_speed_ms": 12.0,
+            "drop_frozen": True}
     ctrl.update(controls or {})
     (root / "config.json").write_text(json.dumps({
         "preset": preset, "controls": ctrl, "candidates": list(candidates or sports),
@@ -223,6 +294,10 @@ def test_preflight_accepts_the_preregistered_set(tmp_path):
     ({"controls": {"max_speed_ms": True}}, "controls.max_speed_ms is True"),
     ({"controls": {"smooth": 1.0}}, "controls.smooth is 1.0, pre-registered 2.0"),
     ({"controls": {"smooth": None}}, "controls.smooth is None"),
+    # D18: frozen tracks are not players
+    ({"controls": {"drop_frozen": False}}, "controls.drop_frozen is False, pre-registered True"),
+    ({"controls": {"drop_frozen": None}}, "controls.drop_frozen is None"),
+    ({"controls": {"drop_frozen": 1}}, "controls.drop_frozen is 1"),
     ({"candidates": ["american_football", "basketball", "handball", "soccer", "rugby_union"]},
      "candidates are"),
     ({"candidates": ["basketball", "handball", "soccer"]}, "candidates are"),
@@ -233,6 +308,35 @@ def test_preflight_accepts_the_preregistered_set(tmp_path):
 def test_preflight_rejects_what_is_not_preregistered(tmp_path, kw, expect):
     bad = _script("run_plan").preflight(_final_like(tmp_path, **kw), 400, MODELS)
     assert len(bad) == 1 and bad[0].startswith(expect)
+
+
+def test_preflight_rejects_a_set_prepared_before_d18(tmp_path):
+    root = _final_like(tmp_path)
+    cfg = json.loads((root / "config.json").read_text())
+    del cfg["controls"]["drop_frozen"]  # config.json written before D18
+    (root / "config.json").write_text(json.dumps(cfg))
+    assert _script("run_plan").preflight(root, 400, MODELS) == [
+        "controls.drop_frozen is None, pre-registered True (D18)"]
+
+
+@pytest.mark.parametrize("which", ["final", "a7b"])
+def test_preflight_rejects_a_kept_player_that_never_moves(tmp_path, which):
+    rp = _script("run_plan")
+    root = _final_like(tmp_path) if which == "final" else _d8_like(tmp_path)
+    check = (lambda: rp.preflight(root, 400, MODELS)) if which == "final" else \
+        (lambda: rp.preflight_a7b(root, 300))
+    rng = np.random.default_rng(0)
+    moving = rng.normal(size=(20, 10, 2)).astype(np.float32)
+    Clip(clip_id="ok", sport="soccer", source="metrica", match_id="m", fps=5.0,
+         xy=moving).save(root / "clips")
+    assert check() == []
+    frozen = moving.copy()
+    frozen[:, 3] = frozen[0, 3]  # one dot that never moves, among moving ones
+    Clip(clip_id="teamtrack-x", sport="handball", source="teamtrack", match_id="m", fps=5.0,
+         xy=frozen).save(root / "clips")
+    bad = check()
+    assert len(bad) == 1 and bad[0].startswith("1 clips with a kept player that never moves")
+    assert "teamtrack-x (1)" in bad[0]
 
 
 def test_preflight_accepts_integral_values_and_skips_video_without_gemini(tmp_path):
@@ -277,7 +381,7 @@ def _d8_like(tmp_path, *, n_frames=40, candidates=("basketball", "handball", "so
     root = tmp_path / "final-d8"
     root.mkdir(parents=True)
     ctrl = {"n_players": 10, "player_mode": "random", "n_frames": n_frames, "smooth": 2.0,
-            "max_speed_ms": 12.0}
+            "max_speed_ms": 12.0, "drop_frozen": True}
     (root / "config.json").write_text(json.dumps({
         "preset": "strict_smooth", "controls": ctrl, "candidates": list(candidates),
         "clips_kept_by_sport": {s: 100 for s in candidates}}))

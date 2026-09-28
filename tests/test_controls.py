@@ -3,7 +3,8 @@ import pytest
 
 from motion_sport.controls import (
     PRESETS, ControlConfig, apply_controls, fill_short_gaps, fit_window, fix_player_count,
-    max_step_speed, median_speed, normalize_space, random_rigid,
+    frozen_tracks, max_step_speed, median_speed, normalize_space, random_rigid, select_players,
+    window_span,
 )
 from motion_sport.loaders import make_toy_clips
 from motion_sport.schema import Clip
@@ -143,3 +144,84 @@ def test_other_rejections_are_counted_by_reason():
 
 def test_every_preset_has_the_speed_ceiling():
     assert all(cfg.max_speed_ms == 12.0 for cfg in PRESETS.values())
+
+
+# ---------------------------------------------------------------- frozen tracks (D18)
+
+def test_frozen_tracks_are_exactly_constant_and_fully_observed():
+    xy = _walk(n_players=5, t=20)
+    xy[:, 1] = 0.0                    # TeamTrack's missing detection, whole window
+    xy[:, 2] = xy[0, 2]               # held value
+    xy[:, 3] = xy[0, 3]
+    xy[7, 3, 0] += 1e-4               # moves once, a tenth of a millimetre: a player
+    xy[:, 4] = np.nan                 # unobserved: not "frozen", just absent
+    assert frozen_tracks(xy).tolist() == [False, True, True, False, False]
+    assert not frozen_tracks(xy[:1]).any()  # one frame says nothing
+
+
+def test_window_span_matches_the_centred_window():
+    assert window_span(20, 20) == slice(0, 20)
+    assert window_span(20, None) == slice(0, 20)
+    assert window_span(24, 20) == slice(2, 22)
+    assert window_span(23, 20) == slice(1, 22)  # half-frame centre: both neighbours count
+    clip = _clip(_walk(t=24).astype(np.float32))
+    win = fit_window(clip, 20, space="spread")
+    assert np.allclose(win.xy, clip.xy[window_span(24, 20)])
+
+
+def test_frozen_tracks_are_never_kept_and_are_counted():
+    """A frozen dot among moving players is dropped as a non-player; the clip keeps N real
+    players, and a clip left with fewer is rejected for players."""
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _walk(n_players=12, t=20)
+    xy[:, 0] = 0.0          # (0, 0) corner dot
+    xy[:, 5] = xy[0, 5]     # held position
+    for seed in range(20):
+        dropped, why = {}, {}
+        out = apply_controls(_clip(xy), cfg, np.random.default_rng(seed), reasons=why,
+                             dropped=dropped)
+        assert out is not None and why == {}
+        assert dropped == {"frozen_tracks": 2, "clips_with_frozen": 1}
+        assert (np.ptp(out.xy, axis=0).max(axis=1) > 1e-3).all()  # every kept dot moves
+        assert any(c["name"] == "drop_frozen" and c["n"] == 2 for c in out.meta["controls"])
+    xy3 = xy.copy()
+    xy3[:, 7] = xy3[0, 7]   # third frozen track: 9 real players left for N = 10
+    dropped, why = {}, {}
+    assert apply_controls(_clip(xy3), cfg, np.random.default_rng(0), reasons=why,
+                          dropped=dropped) is None
+    assert why == {"players": 1}
+    assert dropped == {"frozen_tracks": 3, "clips_with_frozen": 1, "clips_rejected_after_frozen": 1}
+
+
+def test_frozen_only_over_the_window_counts_and_outside_it_does_not():
+    cfg = ControlConfig(n_players=10, player_mode="random")
+    xy = _walk(n_players=11, t=24)            # window = frames 2..21
+    xy[2:22, 0] = xy[2, 0]                    # frozen inside the window, moves outside it
+    d = {}
+    assert select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d).n_players == 10
+    assert d["frozen_tracks"] == 1
+    xy = _walk(n_players=11, t=24)
+    xy[3:22, 0] = xy[3, 0]                    # moves at frame 2, inside the window
+    d = {}
+    select_players(_clip(xy), cfg, np.random.default_rng(0), dropped=d)
+    assert d == {}
+
+
+def test_clips_without_frozen_tracks_are_unchanged_by_the_check():
+    """Same draws and output as before D18 when nothing is frozen (other sources' clips)."""
+    xy = _walk(n_players=14, t=20)
+    on = apply_controls(_clip(xy), PRESETS["strict_smooth"], np.random.default_rng(3))
+    off = apply_controls(_clip(xy), ControlConfig(smooth=2.0, drop_frozen=False),
+                         np.random.default_rng(3))
+    assert np.array_equal(on.xy, off.xy)
+    assert all(cfg.drop_frozen for cfg in PRESETS.values())
+
+
+def test_drop_frozen_off_keeps_the_old_behaviour_and_toy_clips_are_exempt():
+    cfg = ControlConfig(n_players=12, drop_frozen=False)
+    xy = _walk(n_players=12, t=20)
+    xy[:, 0] = 0.0
+    assert apply_controls(_clip(xy), cfg, np.random.default_rng(0)) is not None
+    toy = Clip(clip_id="c", sport="soccer", source="toy", match_id="m", fps=5.0, xy=xy)
+    assert apply_controls(toy, ControlConfig(n_players=12), np.random.default_rng(0)) is not None
+    assert apply_controls(_clip(xy), ControlConfig(n_players=12), np.random.default_rng(0)) is None

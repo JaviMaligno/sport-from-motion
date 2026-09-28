@@ -10,6 +10,7 @@ Each control targets one named shortcut (see docs/design.md, "Fugas"):
 | fit_window(tempo=)   | raw speed, which in field units encodes field size          |
 | (team dropped)       | team structure given for free instead of inferred           |
 | max_step_speed       | tracker teleports (ID swaps, lost tracks) as a source cue   |
+| frozen_tracks        | placeholder tracks (a held or (0,0) value) shown as players |
 
 Controls are pure functions Clip -> Clip (or None when a clip cannot satisfy the
 control, e.g. has fewer fully observed players than N). Whatever they do is
@@ -79,6 +80,37 @@ def fix_player_count(clip: Clip, n: int, rng: np.random.Generator,
     out = clip.replace(xy=clip.xy[:, keep],
                        team=clip.team[keep] if clip.team is not None else None)
     return _log(out, "fix_player_count", n=n, mode=mode)
+
+
+def frozen_tracks(xy: np.ndarray) -> np.ndarray:
+    """[N] True for fully observed tracks whose position is *exactly* constant over all
+    frames of `xy` [T, N, 2]. A measured player always moves a little (detector or sensor
+    noise), so such a track is a held or placeholder value (e.g. TeamTrack's missing
+    detections written as (0, 0)), not a player: shown, it is a motionless dot."""
+    if xy.shape[0] < 2:
+        return np.zeros(xy.shape[1], bool)
+    full = ~np.isnan(xy).any(axis=(0, 2))
+    return full & (xy == xy[:1]).all(axis=(0, 2))
+
+
+def window_span(n_total: int, n: int | None) -> slice:
+    """Source frames spanned by the centred `n`-frame window of `resample_centered` at
+    factor 1 (the whole clip when `n` is None or the clip is shorter)."""
+    if not n or n_total <= n:
+        return slice(0, n_total)
+    t0 = (n_total - 1) / 2 - (n - 1) / 2
+    return slice(int(np.floor(t0)), int(np.ceil(t0 + n - 1)) + 1)
+
+
+def drop_frozen(clip: Clip, span: slice) -> tuple[Clip, int]:
+    """Mark as unobserved (NaN) every track that is frozen over `span`, so it can never
+    be a kept player. -> (clip, number of tracks dropped)."""
+    fr = frozen_tracks(clip.xy[span])
+    if not fr.any():
+        return clip, 0
+    xy = clip.xy.copy()
+    xy[:, fr] = np.nan
+    return _log(clip.replace(xy=xy), "drop_frozen", n=int(fr.sum())), int(fr.sum())
 
 
 def normalize_space(clip: Clip, mode: str = "spread") -> Clip:
@@ -192,6 +224,10 @@ class ControlConfig:
     # tracks: up to 10,000 m/s in TeamTrack, 500 in Metrica), not motion, and they are
     # far more common in some sources than others. None disables the check.
     max_speed_ms: float | None = 12.0
+    # Tracks whose position is exactly constant over the whole window are not players
+    # (held / placeholder values, e.g. TeamTrack's missing detections at (0, 0)); they are
+    # dropped before choosing the N kept players (D18).
+    drop_frozen: bool = True
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -216,25 +252,50 @@ PRESETS: dict[str, ControlConfig] = {
 REJECT_REASONS = ("players", "teleport", "window")
 
 
+def select_players(clip: Clip, cfg: ControlConfig, rng: np.random.Generator,
+                   reasons: dict | None = None, dropped: dict | None = None) -> Clip | None:
+    """First step of `apply_controls`: fill short gaps, drop frozen tracks (if
+    `cfg.drop_frozen`), keep N fully observed players. Same draws from `rng` as
+    `apply_controls`, so an audit can replay which players a prepared clip kept.
+    `dropped` (a Counter), if given, gets the frozen tracks removed ("frozen_tracks"),
+    the clips that had any ("clips_with_frozen") and, of those, the clips then rejected
+    for too few players ("clips_rejected_after_frozen")."""
+    c: Clip = fill_short_gaps(clip)
+    n_frozen = 0
+    if cfg.drop_frozen and c.source != "toy":  # toy clips are synthetic, not tracking
+        span = window_span(c.n_frames, cfg.n_frames if cfg.tempo is None else None)
+        c, n_frozen = drop_frozen(c, span)
+        if dropped is not None and n_frozen:
+            dropped["frozen_tracks"] = dropped.get("frozen_tracks", 0) + n_frozen
+            dropped["clips_with_frozen"] = dropped.get("clips_with_frozen", 0) + 1
+    if cfg.n_players:
+        out = fix_player_count(c, cfg.n_players, rng, cfg.player_mode)
+        if out is None:
+            if reasons is not None:
+                reasons["players"] = reasons.get("players", 0) + 1
+            if dropped is not None and n_frozen:
+                dropped["clips_rejected_after_frozen"] = \
+                    dropped.get("clips_rejected_after_frozen", 0) + 1
+            return None
+        return out
+    # still drop players that are not fully observed
+    full = ~np.isnan(c.xy).any(axis=(0, 2))
+    return c.replace(xy=c.xy[:, full], team=c.team[full] if c.team is not None else None)
+
+
 def apply_controls(clip: Clip, cfg: ControlConfig, rng: np.random.Generator,
-                   reasons: dict | None = None) -> Clip | None:
+                   reasons: dict | None = None, dropped: dict | None = None) -> Clip | None:
     """Clip -> controlled clip, or None. `reasons` (a Counter), if given, gets +1 under
-    the reason of a rejection: "players" (fewer than N fully observed), "teleport"
-    (a kept player's step exceeds `max_speed_ms`) or "window" (too short for the window
-    or the tempo target)."""
+    the reason of a rejection: "players" (fewer than N fully observed, after dropping
+    frozen tracks), "teleport" (a kept player's step exceeds `max_speed_ms`) or "window"
+    (too short for the window or the tempo target). `dropped`: see `select_players`."""
     def reject(why: str) -> None:
         if reasons is not None:
             reasons[why] = reasons.get(why, 0) + 1
 
-    c: Clip | None = fill_short_gaps(clip)
-    if cfg.n_players:
-        c = fix_player_count(c, cfg.n_players, rng, cfg.player_mode)
-        if c is None:
-            reject("players")
-            return None
-    else:  # still drop players that are not fully observed
-        full = ~np.isnan(c.xy).any(axis=(0, 2))
-        c = c.replace(xy=c.xy[:, full], team=c.team[full] if c.team is not None else None)
+    c = select_players(clip, cfg, rng, reasons, dropped)
+    if c is None:
+        return None
     if cfg.max_speed_ms is not None and c.source != "toy":
         # on the kept players, in metres, before any window / rescaling (toy clips are
         # synthetic jitter, not tracking)
