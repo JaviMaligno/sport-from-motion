@@ -59,6 +59,7 @@ entrenado solo con las variables del atajo debe caer al azar después del contro
 | Cámara de retransmisión | solo coordenadas de campo (Nivel A) o estabilizadas simétricamente | — |
 | Deriva del prompt (posición de las opciones) | orden de opciones barajado por ítem, con semilla | — |
 | Desgaste diferencial (un control descarta más clips de un deporte) | aviso en `prepare` y recuento por deporte en `config.json` | — |
+| Teletransportes del tracker (cambios de ID: pasos de cientos de m/s, muy desiguales entre fuentes) | techo físico `max_speed_ms` = 12 m/s sobre los jugadores conservados, en metros; rechazos por motivo, deporte y fuente en `config.json`, aviso si una fuente pierde > 10 % | test |
 
 **Lo que el smoke test ya cazó** (y es material para el artículo, en el espíritu de
 la serie): con datos de juguete diseñados para tener atajos, dos versiones del

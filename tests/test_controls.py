@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from motion_sport.controls import (
-    PRESETS, apply_controls, fill_short_gaps, fit_window, fix_player_count, median_speed,
-    normalize_space, random_rigid,
+    PRESETS, ControlConfig, apply_controls, fill_short_gaps, fit_window, fix_player_count,
+    max_step_speed, median_speed, normalize_space, random_rigid,
 )
 from motion_sport.loaders import make_toy_clips
 from motion_sport.schema import Clip
@@ -92,3 +92,54 @@ def test_strict_smooth_reduces_jitter_and_keeps_shape():
     b = apply_controls(clip, PRESETS["strict_smooth"], np.random.default_rng(1))
     assert a is not None and b is not None and a.xy.shape == b.xy.shape
     assert jerk(b) < 0.5 * jerk(a)
+
+
+def _walk(n_players=12, t=20, speed=5.0, seed=0):
+    """Players walking in straight lines at `speed` m/s, 5 Hz, in metres."""
+    rng = np.random.default_rng(seed)
+    start = rng.uniform(0, 50, (n_players, 2))
+    ang = rng.uniform(0, 2 * np.pi, n_players)
+    v = np.stack([np.cos(ang), np.sin(ang)], 1) * speed
+    return (start[None] + np.arange(t)[:, None, None] / 5.0 * v[None]).astype(np.float32)
+
+
+def test_max_step_speed_is_in_metres_per_second():
+    assert max_step_speed(_clip(_walk(speed=5.0))) == pytest.approx(5.0, rel=1e-4)
+
+
+def test_teleport_filter_rejects_on_kept_players_only_and_counts_the_reason():
+    cfg = ControlConfig(n_players=10, player_mode="central")
+    ok = apply_controls(_clip(_walk()), cfg, np.random.default_rng(0))
+    assert ok is not None and ok.meta["max_step_speed_ms"] == pytest.approx(5.0, rel=1e-3)
+    assert ok.meta["control_config"]["max_speed_ms"] == 12.0
+    xy = _walk()
+    xy[10:, 3] += 30.0  # one step of 30 m in 0.2 s = 150 m/s: an ID swap
+    why = {}
+    all12 = ControlConfig(n_players=12)
+    assert apply_controls(_clip(xy), all12, np.random.default_rng(0), reasons=why) is None
+    assert why == {"teleport": 1}
+    # the teleporting player is the only one far from the centre: with N=10 central of
+    # 12 it is dropped first, and the clip survives
+    far = _walk()
+    far[:, 3] += 500.0
+    far[10:, 3] += 30.0
+    assert apply_controls(_clip(far), cfg, np.random.default_rng(0)) is not None
+    # the check runs before any rescaling: a fast sport under the ceiling is kept
+    assert apply_controls(_clip(_walk(speed=11.0)), cfg, np.random.default_rng(0)) is not None
+    assert apply_controls(_clip(xy), ControlConfig(n_players=12, max_speed_ms=None),
+                          np.random.default_rng(0)) is not None
+
+
+def test_other_rejections_are_counted_by_reason():
+    why = {}
+    few = _walk(n_players=6)
+    assert apply_controls(_clip(few), ControlConfig(n_players=10), np.random.default_rng(0),
+                          reasons=why) is None
+    short = _walk(t=10)
+    assert apply_controls(_clip(short), ControlConfig(n_players=10), np.random.default_rng(0),
+                          reasons=why) is None
+    assert why == {"players": 1, "window": 1}
+
+
+def test_every_preset_has_the_speed_ceiling():
+    assert all(cfg.max_speed_ms == 12.0 for cfg in PRESETS.values())

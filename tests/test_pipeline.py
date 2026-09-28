@@ -271,3 +271,46 @@ def test_cli_prepare_passes_n_frames(tmp_path):
     cli.main(["prepare", "--clips", str(tmp_path / "clips"), "--out", str(tmp_path / "items"),
               "--conditions", "motion", "--reprs", "text", "--n-frames", "10"])
     assert json.loads((tmp_path / "items" / "config.json").read_text())["controls"]["n_frames"] == 10
+
+
+def _walkers(tmp_path, source, n, teleport, seed):
+    """n clips of 12 players walking at 4 m/s; `teleport` of them with one 100 m/s step."""
+    from motion_sport.schema import Clip
+
+    rng = np.random.default_rng(seed)
+    for i in range(n):
+        start = rng.uniform(0, 40, (12, 2))
+        v = rng.normal(0, 1, (12, 2))
+        v = v / np.linalg.norm(v, axis=1, keepdims=True) * 4.0
+        xy = start[None] + np.arange(24)[:, None, None] / 5.0 * v[None]
+        if i < teleport:
+            xy[12:, :] += np.array([20.0, 0.0])  # everyone jumps 20 m in one 0.2 s step
+        Clip(clip_id=f"{source}-{i:03d}", sport="handball", source=source,
+             match_id=f"{source}-m{i % 3}", fps=5.0, xy=xy).save(tmp_path / "clips")
+
+
+def test_prepare_reports_rejections_per_sport_and_source(tmp_path, capsys):
+    from motion_sport import cli
+
+    _walkers(tmp_path, "clean", 10, 0, seed=1)
+    _walkers(tmp_path, "jumpy", 10, 3, seed=2)
+    cli.main(["prepare", "--clips", str(tmp_path / "clips"), "--out", str(tmp_path / "items"),
+              "--preset", "strict_smooth", "--conditions", "motion", "--reprs", "text",
+              "--n-players", "10"])
+    out = capsys.readouterr().out
+    cfg = json.loads((tmp_path / "items" / "config.json").read_text())
+    assert cfg["controls"]["max_speed_ms"] == 12.0
+    assert cfg["clips_in_by_source"] == {"clean": 10, "jumpy": 10}
+    assert cfg["clips_kept_by_source"] == {"clean": 10, "jumpy": 7}
+    assert cfg["rejected_by_source"] == {"jumpy": {"teleport": 3}}
+    assert cfg["rejected_by_sport"] == {"handball": {"teleport": 3}}
+    assert "WARNING: source jumpy: lost 3/10" in out and "source clean" not in out
+    # the ceiling is configurable; 0 switches it off
+    cli.main(["prepare", "--clips", str(tmp_path / "clips"), "--out", str(tmp_path / "off"),
+              "--conditions", "motion", "--reprs", "text", "--n-players", "10",
+              "--max-speed-ms", "0"])
+    off = json.loads((tmp_path / "off" / "config.json").read_text())
+    assert off["controls"]["max_speed_ms"] is None and off["n_clips_kept"] == 20
+    hi = pipeline.prepare(str(tmp_path / "clips"), str(tmp_path / "hi"), conditions=["motion"],
+                          reprs=["text"], n_players=10, max_speed_ms=200.0)
+    assert json.loads((hi / "config.json").read_text())["n_clips_kept"] == 20

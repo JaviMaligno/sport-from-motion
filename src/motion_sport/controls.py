@@ -9,6 +9,7 @@ Each control targets one named shortcut (see docs/design.md, "Fugas"):
 | random_rigid         | field orientation, attack direction, pitch aspect ratio     |
 | fit_window(tempo=)   | raw speed, which in field units encodes field size          |
 | (team dropped)       | team structure given for free instead of inferred           |
+| max_step_speed       | tracker teleports (ID swaps, lost tracks) as a source cue   |
 
 Controls are pure functions Clip -> Clip (or None when a clip cannot satisfy the
 control, e.g. has fewer fully observed players than N). Whatever they do is
@@ -114,6 +115,12 @@ def random_rigid(clip: Clip, rng: np.random.Generator) -> Clip:
     return _log(clip.replace(xy=clip.xy @ rot.T), "random_rigid", angle=float(a))
 
 
+def max_step_speed(clip: Clip) -> float:
+    """Fastest single step of any player, in clip units per second (m/s on raw clips)."""
+    step = np.linalg.norm(np.diff(clip.xy, axis=0), axis=2) * clip.fps
+    return float(np.nanmax(step)) if step.size and not np.isnan(step).all() else 0.0
+
+
 def median_speed(clip: Clip) -> float:
     """Median per-player speed in clip units per second."""
     step = np.linalg.norm(np.diff(clip.xy, axis=0), axis=2) * clip.fps
@@ -180,6 +187,11 @@ class ControlConfig:
     # |acc| 7 m/s^2 vs ~1 in Metrica/SkillCorner), and a trained learner reads that
     # jitter as "stop-start" = basketball. Smoothing equalises it.
     smooth: float = 0.0
+    # Physical ceiling on any kept player's step speed (m/s at the clip rate, on the raw
+    # metre coordinates). Faster steps are tracker teleports (ID swaps, re-acquired
+    # tracks: up to 10,000 m/s in TeamTrack, 500 in Metrica), not motion, and they are
+    # far more common in some sources than others. None disables the check.
+    max_speed_ms: float | None = 12.0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -201,21 +213,43 @@ PRESETS: dict[str, ControlConfig] = {
 }
 
 
-def apply_controls(clip: Clip, cfg: ControlConfig, rng: np.random.Generator) -> Clip | None:
+REJECT_REASONS = ("players", "teleport", "window")
+
+
+def apply_controls(clip: Clip, cfg: ControlConfig, rng: np.random.Generator,
+                   reasons: dict | None = None) -> Clip | None:
+    """Clip -> controlled clip, or None. `reasons` (a Counter), if given, gets +1 under
+    the reason of a rejection: "players" (fewer than N fully observed), "teleport"
+    (a kept player's step exceeds `max_speed_ms`) or "window" (too short for the window
+    or the tempo target)."""
+    def reject(why: str) -> None:
+        if reasons is not None:
+            reasons[why] = reasons.get(why, 0) + 1
+
     c: Clip | None = fill_short_gaps(clip)
     if cfg.n_players:
         c = fix_player_count(c, cfg.n_players, rng, cfg.player_mode)
         if c is None:
+            reject("players")
             return None
     else:  # still drop players that are not fully observed
         full = ~np.isnan(c.xy).any(axis=(0, 2))
         c = c.replace(xy=c.xy[:, full], team=c.team[full] if c.team is not None else None)
+    if cfg.max_speed_ms is not None and c.source != "toy":
+        # on the kept players, in metres, before any window / rescaling (toy clips are
+        # synthetic jitter, not tracking)
+        top = max_step_speed(c)
+        if top > cfg.max_speed_ms:
+            reject("teleport")
+            return None
+        c.meta["max_step_speed_ms"] = round(top, 3)
     if cfg.tempo is not None and not isinstance(cfg.tempo, (int, float)):
         raise ValueError("resolve tempo='auto' to a number first (pipeline.prepare does)")
     if cfg.n_frames:
         c = fit_window(c, cfg.n_frames, space=cfg.space,
                        tempo=float(cfg.tempo) if cfg.tempo else None)
         if c is None:
+            reject("window")
             return None
     elif cfg.tempo:
         raise ValueError("tempo normalisation needs n_frames")

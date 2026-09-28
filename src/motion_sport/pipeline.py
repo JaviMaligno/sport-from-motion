@@ -38,6 +38,7 @@ VALID = {
     "kinematics_solo": {"sheet", "trails", "text", "gif", "video"},
 }
 STATIC_SPEED_MS = 1.0  # median player speed (m/s) under which a clip is tagged "static"
+SOURCE_LOSS_WARN = 0.10  # prepare warns when a source loses more than this share of its clips
 
 
 def stable_seed(*parts: str) -> int:
@@ -81,8 +82,11 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
             candidates: list[str] | None = None, frames_per_view: int = 8,
             image_size: int = 320, seed: int = 0,
             n_players: int | None = None, player_mode: str | None = None,
-            n_frames: int | None = None) -> pathlib.Path:
+            n_frames: int | None = None, max_speed_ms: float | None = None) -> pathlib.Path:
     cfg = PRESETS[preset]
+    if max_speed_ms is not None:
+        # teleport ceiling in m/s on the raw kept players; <= 0 switches the check off
+        cfg = dc_replace(cfg, max_speed_ms=max_speed_ms if max_speed_ms > 0 else None)
     if n_frames is not None:
         # clip-duration sweep: the window is n_frames at the clip rate (5 Hz x seconds);
         # ingest the clips at least that long (--clip-seconds)
@@ -104,19 +108,25 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
     if cfg.tempo == "auto":
         cfg = dc_replace(cfg, tempo=resolve_auto_tempo(raw, cfg, seed))
     cands = sorted(set(candidates or []) | {c.sport for c in raw})
-    items, kept, kept_by_sport = [], 0, Counter()
+    items, kept, kept_by_sport, kept_by_source = [], 0, Counter(), Counter()
+    rejected_by_sport: dict[str, Counter] = defaultdict(Counter)
+    rejected_by_source: dict[str, Counter] = defaultdict(Counter)
     for clip in raw:
         rng = np.random.default_rng(stable_seed(clip.clip_id, str(seed)))
         tags = list(clip.tags)
         if median_speed(clip) < STATIC_SPEED_MS and clip.source != "toy":
             tags.append("static")  # computed in metres, before any rescaling
-        c = apply_controls(clip, cfg, rng)
+        why: Counter = Counter()
+        c = apply_controls(clip, cfg, rng, reasons=why)
         if c is None:
+            rejected_by_sport[clip.sport].update(why)
+            rejected_by_source[clip.source].update(why)
             continue
         c = c.replace(tags=sorted(set(tags)))
         c.save(out / "clips")
         kept += 1
         kept_by_sport[c.sport] += 1
+        kept_by_source[c.source] += 1
         for cond in conditions:
             state = rng.bit_generator.state  # replayed below for the full-rate video view
             view = build_view(c, cond, rng, k=frames_per_view)
@@ -188,12 +198,20 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
                                 state_text=text, state_json=view_to_state(view))
                 items.append(item)
     in_by_sport = Counter(c.sport for c in raw)
+    in_by_source = Counter(c.source for c in raw)
     for sport, n_in in in_by_sport.items():
         if kept_by_sport[sport] < 0.5 * n_in:
             # Differential attrition is itself a leak: the surviving clips of one
             # sport would be a biased subset (e.g. only its slowest plays).
             print(f"WARNING: {sport}: only {kept_by_sport[sport]}/{n_in} clips survived the "
                   f"controls — check clip length / n_players before trusting results")
+    for source, n_in in sorted(in_by_source.items()):
+        lost = n_in - kept_by_source[source]
+        if lost > SOURCE_LOSS_WARN * n_in:
+            # a source-specific loss (e.g. a tracker that teleports) shifts that source's
+            # share within its sport: the survivors are its cleanest clips only
+            print(f"WARNING: source {source}: lost {lost}/{n_in} clips ({lost / n_in:.0%}) to the "
+                  f"controls, by reason {dict(rejected_by_source[source])}")
     (out / "items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
     (out / "config.json").write_text(json.dumps({
         "preset": preset, "controls": cfg.as_dict(), "seed": seed, "candidates": cands,
@@ -201,6 +219,10 @@ def prepare(clips_dir: str, out_dir: str, *, preset: str = "strict",
         "frames_per_view": frames_per_view, "image_size": image_size,
         "n_clips_in": len(raw), "n_clips_kept": kept, "n_items": len(items),
         "clips_in_by_sport": dict(in_by_sport), "clips_kept_by_sport": dict(kept_by_sport),
+        "clips_in_by_source": dict(in_by_source), "clips_kept_by_source": dict(kept_by_source),
+        # rejections by reason (players / teleport / window), per sport and per source
+        "rejected_by_sport": {k: dict(v) for k, v in sorted(rejected_by_sport.items())},
+        "rejected_by_source": {k: dict(v) for k, v in sorted(rejected_by_source.items())},
     }, indent=2))
     return out
 

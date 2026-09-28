@@ -267,3 +267,24 @@ paralelo). Los precios son supuestos, no facturas.
 DRY_RUN=1 bash scripts/final_run.sh     # comprobar los comandos
 bash scripts/final_run.sh               # la corrida (reanudable)
 ```
+
+### D2 (2026-09-28). Techo físico de velocidad: fuera los «teletransportes» del tracker
+
+- **Qué cambia.** `ControlConfig.max_speed_ms = 12` (m/s) en todos los presets. Un clip se
+  rechaza si algún jugador **conservado** (tras `fix_player_count`) da un paso más rápido
+  que eso a la frecuencia del clip. Se mide sobre las coordenadas en metros, antes del
+  suavizado y de normalizar. `prepare --max-speed-ms X` lo cambia (0 lo apaga). `prepare`
+  guarda en `config.json` los rechazos por motivo (`players`, `teleport`, `window`), por
+  deporte (`rejected_by_sport`) y por fuente (`rejected_by_source`), con entradas y
+  supervivientes por fuente. Avisa si una fuente pierde más del 10 % de sus clips.
+- **Por qué.** Un paso de 20 m en 0,2 s no es movimiento: es un cambio de ID o una pista
+  que se recupera. Y se reparte muy desigual entre fuentes. En una muestra de `pool_final`
+  (600 clips por fuente, N = 10 aleatorio), la velocidad máxima por clip supera 12 m/s en
+  el 11 % de TeamTrack (fútbol 14 %, balonmano 9 %, baloncesto 3 %; máximo 10.740 m/s),
+  el 2,5 % de Metrica (máximo 504 m/s), el 0,3 % de NFL y SportVU, y el 0 % de EIGD y
+  SkillCorner. Es otra firma del tracker, como la de C4, y el suavizado la reparte por el
+  clip en vez de quitarla.
+- **Coste conocido.** TeamTrack pierde ~11 % y Metrica ~2,5 % antes de muestrear, y
+  `prepare` lo avisa. El techo (12 m/s) está por encima del sprint humano (~10-11 m/s) y del
+  p99 de todas las fuentes limpias (≤ 9 m/s).
+

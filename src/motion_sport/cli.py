@@ -107,13 +107,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--n-frames", type=int,
                    help="override the preset's window length in frames at the clip rate "
                         "(5 Hz: 10 = 2 s, 20 = 4 s, 40 = 8 s); clips must be at least that long")
+    p.add_argument("--max-speed-ms", type=float,
+                   help="reject a clip if any kept player's step exceeds this speed (m/s, raw "
+                        "metres, at the clip rate): tracker teleports. Default: the preset's "
+                        "(12); 0 switches it off")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=lambda a: print(pipeline.prepare(
         a.clips, a.out, preset=a.preset, conditions=a.conditions.split(","),
         reprs=a.reprs.split(","), per_sport=a.per_sport,
         candidates=a.candidates.split(",") if a.candidates else None,
         frames_per_view=a.frames_per_view, image_size=a.image_size, seed=a.seed,
-        n_players=a.n_players, player_mode=a.player_mode, n_frames=a.n_frames)))
+        n_players=a.n_players, player_mode=a.player_mode, n_frames=a.n_frames,
+        max_speed_ms=a.max_speed_ms)))
 
     r = sub.add_parser("run", help="query a model: chat (backends/chat.py) or typed-decision "
                                    "(backends/decision.py: jev:, laya:, laya-http:)")
