@@ -184,7 +184,8 @@ contraste es significativo si p_holm < 0,05. Si un contraste tiene menos de 5 pa
 clips cubren decenas de partidos. Si un modelo no puede correr (por ejemplo, Opus 5.5
 sin habilitar en Vertex), la familia es la que exista (16 contrastes). Se dice así, y
 el modelo no se sustituye por otro. `report` lo hace solo: un modelo con **todas** sus
-filas en error sale de los contrastes y de la familia (`excluded_models`, D4). Las celdas
+filas en error sale de los contrastes y de la familia (`excluded_models`, D4), y una celda
+con más de un 50 % de errores no recuperados, también (sección 8). Las celdas
 A7b (8 s) tampoco entran en la familia: van en otro directorio y se analizan aparte, como
 exploratorias (sección 7, D7).
 
@@ -258,10 +259,19 @@ la sección 6.
   (`PASSES=2`) y se puede relanzar las veces que haga falta, siempre con los mismos
   ajustes.
 - Los errores que queden al final **cuentan como fallo** en todas las métricas y
-  contrastes (etiqueta `__none__`, como ya hace `evaluate`). Nunca se quitan.
-- **Una celda con más de un 2 % de errores no recuperados** (más de 8 de 400, o de 4
-  de 200) se marca en las tablas con su recuento, y lo mismo sus contrastes. No se
-  descarta en silencio. El lanzador imprime ese resumen al terminar.
+  contrastes (etiqueta `__none__`, como ya hace `evaluate`). Nunca se quitan filas.
+- **Una celda con más de un 2 % y hasta un 50 % de errores no recuperados** (más de 8 de
+  400, o de 4 de 200) sigue en el análisis, con sus errores como fallo, y se marca en las
+  tablas con su recuento, y lo mismo sus contrastes (`!` en `report`). No se descarta en
+  silencio. El lanzador imprime ese resumen al terminar.
+- **Una celda con más de un 50 % de errores no recuperados** no mide al modelo: es un
+  fallo sistémico (ruta caída, filtro de contenido, respuestas que no se pueden leer).
+  Sale de **todos** los contrastes en los que participa, primarios y secundarios, y de la
+  familia de Holm; su fila sigue en la tabla, con su recuento y la marca `cell excluded:
+  systemic failure` (`excluded_cells` en el JSON). Es la misma regla que la de un modelo
+  sin ninguna respuesta (D4), aplicada celda a celda. El umbral se cuenta sobre las filas
+  presentes de la celda (todas sus réplicas), porque las filas que faltan no son errores
+  (siguiente punto). Se fija antes de cualquier dato de modelo (sección 11).
 - **Filas que faltan** (D4). Una celda planificada con menos filas que su `--limit`, o
   sin fichero (p. ej. una corrida cortada), no es un error registrado: no hay respuesta
   que contar. El lanzador es reanudable y se relanza con los mismos ajustes hasta que

@@ -330,14 +330,16 @@ def test_all_error_model_is_out_of_the_contrasts_and_the_holm_family(prepared, c
     for cond, rep in PRIMARY_CELLS:
         pipeline.run_model(str(prepared), "fake:ok", condition=cond, rep=rep, complete=_coin(5))
         pipeline.run_model(str(prepared), "fake:dead", condition=cond, rep=rep, complete=_boom)
-    # a model with one working cell is not excluded: its errors count as failures
+    # a model with one working cell is not excluded as a model, but its all-error cell is
+    # a systemic failure (> 50 %, section 8) and leaves the contrasts
     pipeline.run_model(str(prepared), "fake:half", condition="motion", rep="sheet", complete=_coin(6))
     pipeline.run_model(str(prepared), "fake:half", condition="motion_shuffled", rep="sheet",
                        complete=_boom)
     rep = pipeline.report(str(prepared), n_boot=50)
     assert [e["model"] for e in rep["excluded_models"]] == ["fake:dead"]
     assert not any(c["model"] == "fake:dead" for c in rep["contrasts"])
-    assert rep["holm"]["family_size"] == 3 + 1  # fake:ok (order, shape, text) + fake:half (order)
+    assert rep["holm"]["family_size"] == 3  # fake:ok (order, shape, text); fake:half none
+    assert ("fake:half", "motion_shuffled/sheet") in {(c["model"], c["cell"]) for c in rep["excluded_cells"]}
     assert any(r["model"] == "fake:dead" for r in rep["runs"].values())  # still in the table
     cli.main(["report", "--items", str(prepared), "--n-boot", "20"])
     assert "NOTE: fake:dead excluded from every contrast and from the Holm family" in \
@@ -373,3 +375,67 @@ def test_no_plan_json_no_incomplete(prepared):
     pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", complete=_coin(1),
                        limit=5)
     assert pipeline.plan_status(prepared) == [] and pipeline.report(str(prepared), n_boot=20)["incomplete"] == []
+
+
+def _errors_on(error_ids, seed=0):
+    """A coin-flipping fake backend that fails on the given item numbers (0-based order)."""
+    coin, seen = _coin(seed), []
+
+    def complete(model_id, req):
+        seen.append(1)
+        if len(seen) - 1 in error_ids:
+            raise chat.BackendError("HTTP 500")
+        return coin(model_id, req)
+    return complete
+
+
+def test_systemic_failure_cell_leaves_every_contrast_and_the_holm_family(prepared, capsys):
+    from motion_sport import cli
+
+    # fake:m: formation/sheet 13 of 24 errors (> 50 %) -> excluded; motion_shuffled/sheet
+    # 3 of 24 (12.5 %) -> kept and flagged; motion/sheet, motion/text and kinematics clean
+    for cond, rep in PRIMARY_CELLS + (("kinematics", "sheet"),):
+        errs = {"formation": set(range(13)), "motion_shuffled": {0, 1, 2}}.get(cond, set())
+        pipeline.run_model(str(prepared), "fake:m", condition=cond, rep=rep, workers=1,
+                           complete=_errors_on(errs, seed=hash((cond, rep)) % 100))
+    # exactly 50 % is not above the threshold: stays, flagged
+    pipeline.run_model(str(prepared), "fake:m", condition="kinematics", rep="text", workers=1,
+                       complete=_errors_on(set(range(12))))
+    rep = pipeline.report(str(prepared), n_boot=50)
+    assert [(c["cell"], c["errors"], c["n_rows"]) for c in rep["excluded_cells"]] == \
+        [("formation/sheet", 13, 24)]
+    assert {c["cell"] for c in rep["flagged_cells"]} == {"motion_shuffled/sheet", "kinematics/text"}
+    assert not any("formation/sheet" in (c["a"], c["b"]) for c in rep["contrasts"])
+    assert sorted(c["contrast"] for c in rep["primary_contrasts"]) == ["order", "text_vs_image"]
+    assert rep["holm"]["family_size"] == 2
+    order = next(c for c in rep["primary_contrasts"] if c["contrast"] == "order")
+    assert order["flagged_cells"] == ["motion_shuffled/sheet"]
+    assert any(c["b"] == "kinematics/sheet" for c in rep["secondary_contrasts"])  # still there
+    # the excluded cell's row stays in the table
+    formation = rep["runs"]["fake__m__formation__sheet"]
+    assert formation["cell_status"] == "excluded" and formation["n"] == 24
+    cli.main(["report", "--items", str(prepared), "--n-boot", "20"])
+    out = capsys.readouterr().out
+    table_row = next(line for line in out.splitlines() if line.startswith("fake:m") and "formation" in line)
+    assert "cell excluded: systemic failure (13/24 errors)" in table_row
+    assert "formation/sheet          cell excluded: systemic failure (13/24 unrecovered errors)" in out
+    assert "! errors > 2 % in motion_shuffled/sheet" in out
+
+
+def test_launcher_summary_names_the_systemic_failure(prepared):
+    import importlib.util
+    import pathlib
+
+    spec = importlib.util.spec_from_file_location(
+        "run_plan", pathlib.Path(__file__).parents[1] / "scripts" / "run_plan.py")
+    rp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rp)
+    pipeline.run_model(str(prepared), "fake:m", condition="formation", rep="sheet", workers=1,
+                       complete=_errors_on(set(range(13))))
+    pipeline.run_model(str(prepared), "fake:m", condition="motion", rep="sheet", workers=1,
+                       complete=_errors_on({0}))
+    out = rp.check(prepared)
+    assert any(line.startswith("fake__m__formation__sheet.jsonl: 13/24") and "SYSTEMIC FAILURE" in line
+               for line in out)
+    assert any(line.startswith("fake__m__motion__sheet.jsonl: 1/24") and "REPORT AS SUCH" in line
+               for line in out)

@@ -508,6 +508,10 @@ def _contrast_pairs(cells: dict) -> list[tuple[CellKey, CellKey]]:
 
 
 ERROR_FLAG_SHARE = 0.02  # pre-registration section 8: > 2 % unrecovered errors is flagged
+# pre-registration section 8: a cell with > 50 % unrecovered errors is a systemic failure
+# (route down, content filter, broken parser...), not a model answer; it leaves every
+# contrast and the Holm family, and its row stays in the table
+SYSTEMIC_FAILURE_SHARE = 0.5
 
 
 def _unrecovered(r: dict) -> bool:
@@ -597,26 +601,50 @@ def report(items_dir: str, n_boot: int = 2000, tag: str | None = None) -> dict:
     excluded = [{"model": m, "n_rows": len(rs), "reason": "every row is an unrecovered error"}
                 for m, rs in sorted(rows_of.items()) if rs and all(_unrecovered(r) for r in rs)]
     out_models = {e["model"] for e in excluded}
+    # Unrecovered errors per cell (every replicate's rows; missing rows are not errors):
+    # > SYSTEMIC_FAILURE_SHARE -> the cell leaves every contrast (primary and secondary)
+    # and the Holm family; > ERROR_FLAG_SHARE -> it stays (errors count as wrong) and is
+    # flagged, with its contrasts. Pre-registration section 8.
+    cell_errors = {}
+    for key, by_rep in reps.items():
+        rows = [r for rs in by_rep.values() for r in rs]
+        err = sum(_unrecovered(r) for r in rows)
+        status = ("excluded" if err > SYSTEMIC_FAILURE_SHARE * len(rows) else
+                  "flagged" if err > ERROR_FLAG_SHARE * len(rows) else "ok")
+        cell_errors[key] = {"model": key[0], "cell": _cell_label(*key[1:]), "n_rows": len(rows),
+                            "errors": err, "error_rate": err / len(rows), "status": status}
+    out_cells = {k for k, v in cell_errors.items() if v["status"] == "excluded"}
     primary_of = {spec: name for name, spec in PRIMARY_CONTRASTS.items()}
     contrasts = []
     for a, b in _contrast_pairs(cells):
-        if a[0] in out_models:
+        if a[0] in out_models or a in out_cells or b in out_cells:
             continue
         name = primary_of.get((a[1:], b[1:]))
+        flagged = [cell_errors[k]["cell"] for k in (a, b) if cell_errors[k]["status"] == "flagged"]
         contrasts.append({"model": a[0], "a": _cell_label(*a[1:]), "b": _cell_label(*b[1:]),
                           "primary": name is not None, "contrast": name,
+                          **({"flagged_cells": flagged} if flagged else {}),
                           **paired_difference(cells[a], cells[b], n_boot)})
     primary = [c for c in contrasts if c["primary"]]
     for c, adj in zip(primary, holm([c["p"] for c in primary])):
         c["p_holm"] = adj
         c["significant"] = adj < ALPHA
+    def _status(meta: dict) -> dict:
+        c = cell_errors[(meta["model"], meta["condition"], meta["repr"], meta["prompt_style"])]
+        return {"cell_status": c["status"], "cell_errors": c["errors"], "cell_rows": c["n_rows"]}
+
     return {"candidates": cands, "tag": tag,
-            "runs": {k: {**v["meta"], **v["summary"]} for k, v in runs.items()},
+            "runs": {k: {**v["meta"], **v["summary"], **_status(v["meta"])}
+                     for k, v in runs.items()},
             "replicates": replicates, "contrasts": contrasts,
             "primary_contrasts": primary,
             "secondary_contrasts": [c for c in contrasts if not c["primary"]],
             "holm": {"family_size": sum(c["p"] == c["p"] for c in primary), "alpha": ALPHA},
             "excluded_models": excluded,
+            # cells with > 50 % unrecovered errors (out of every contrast and of Holm) and
+            # with 2-50 % (kept, errors count as wrong, flagged); section 8
+            "excluded_cells": [v for v in cell_errors.values() if v["status"] == "excluded"],
+            "flagged_cells": [v for v in cell_errors.values() if v["status"] == "flagged"],
             # planned cells (plan.json) with missing rows or > 2 % errors; tag-independent
             "incomplete": [c for c in plan_status(root) if c["flagged"]],
             "ignored": ignored}

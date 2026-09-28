@@ -190,6 +190,20 @@ def _few(c: dict) -> str:
     return f", only {c['n_matches']} matches" if c.get("too_few_matches") else ""
 
 
+def _cell_note(s: dict) -> str:
+    """Table suffix for a cell with unrecovered errors above the section-8 thresholds."""
+    if s.get("cell_status") == "excluded":
+        return f"  cell excluded: systemic failure ({s['cell_errors']}/{s['cell_rows']} errors)"
+    if s.get("cell_status") == "flagged":
+        return f"  ! {s['cell_errors']}/{s['cell_rows']} errors (> 2 %)"
+    return ""
+
+
+def _flag(c: dict) -> str:
+    """Contrast suffix: which of its cells has > 2 % unrecovered errors."""
+    return f"  ! errors > 2 % in {', '.join(c['flagged_cells'])}" if c.get("flagged_cells") else ""
+
+
 def _name(model: str, width: int = 34) -> str:
     """Fit a model id in `width` keeping both ends (route and variant suffix)."""
     return model if len(model) <= width else model[:width - 17] + ".." + model[-15:]
@@ -221,7 +235,8 @@ def _report(a) -> None:
         print(f"{_name(s['model']):34} {s['condition'][:15]:15} {s['repr'][:8]:8} {_var(s):6} {s['n']:4d} "
               f"{s['accuracy']:5.2f} {_fmt_ci(s['accuracy_ci']):>12} {s['balanced_accuracy']:5.2f} "
               f"{s['macro_f1']:5.2f} {s['kappa']:6.2f} {s['prior_corrected_accuracy']:6.2f} "
-              f"{_fmt_ci(s['prior_corrected_accuracy_ci']):>12} {s['log_loss']:7.3f}")
+              f"{_fmt_ci(s['prior_corrected_accuracy_ci']):>12} {s['log_loss']:7.3f}"
+              f"{_cell_note(s)}")
     cls = rep["candidates"]
     print("\nper-class recall (95% CI in the JSON output):")
     print(f"{'model':34} {'condition':15} {'repr':8} {'var':6} " + " ".join(f"{_short(c):>11}" for c in cls))
@@ -242,6 +257,18 @@ def _report(a) -> None:
     for e in rep.get("excluded_models", []):
         print(f"\nNOTE: {e['model']} excluded from every contrast and from the Holm family: "
               f"{e['reason']} ({e['n_rows']} rows)")
+    if rep.get("excluded_cells"):
+        print("\ncells excluded from every contrast and from the Holm family "
+              "(> 50 % unrecovered errors; rows stay in the table):")
+        for c in rep["excluded_cells"]:
+            print(f"  {_name(c['model']):34} {c['cell']:24} cell excluded: systemic failure "
+                  f"({c['errors']}/{c['n_rows']} unrecovered errors)")
+    if rep.get("flagged_cells"):
+        print("\ncells with > 2 % unrecovered errors (kept; errors count as wrong; "
+              "! marks their contrasts):")
+        for c in rep["flagged_cells"]:
+            print(f"  {_name(c['model']):34} {c['cell']:24} {c['errors']}/{c['n_rows']} "
+                  f"unrecovered errors ({c['error_rate']:.1%})")
     if rep.get("incomplete"):
         print("\nplanned cells (plan.json) with missing rows or > 2 % unrecovered errors:")
         for c in rep["incomplete"]:
@@ -255,12 +282,12 @@ def _report(a) -> None:
             print(f"  {_name(c['model']):34} {c['contrast']:17} {c['a']} - {c['b']}: "
                   f"{c['diff']:+.2f} {_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])} "
                   f"p_holm={_fmt_p(c['p_holm'])}{' *' if c['significant'] else ''}  (n={c['n']}"
-                  f"{_few(c)})")
+                  f"{_few(c)}){_flag(c)}")
     if rep.get("secondary_contrasts"):
         print("\nsecondary contrasts (exploratory; raw p, not corrected):")
         for c in rep["secondary_contrasts"]:
             print(f"  {_name(c['model']):34} {c['a']} - {c['b']}: {c['diff']:+.2f} "
-                  f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']}{_few(c)})")
+                  f"{_fmt_ci(c['ci'])}  p={_fmt_p(c['p'])}  (n={c['n']}{_few(c)}){_flag(c)}")
 
 if __name__ == "__main__":
     main()

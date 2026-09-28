@@ -75,7 +75,8 @@ def write_plan(items_dir: str | pathlib.Path, lines: list[str]) -> pathlib.Path:
 def check(items_dir: str | pathlib.Path) -> list[str]:
     """One line per prediction file with unrecovered errors, and one per planned cell
     with missing rows. Flag: missing rows, or errors above 2 % of the planned (else
-    the present) rows — pre-registration section 8."""
+    the present) rows; above 50 % of the present rows the cell is a systemic failure
+    that report leaves out of every contrast — pre-registration section 8."""
     root = pathlib.Path(items_dir)
     status = {s["file"]: s for s in pipeline.plan_status(root)}
     out = []
@@ -86,6 +87,8 @@ def check(items_dir: str | pathlib.Path) -> list[str]:
         base = status.get(p.stem, {}).get("planned") or len(rows)
         if rows and err:
             flag = "  > 2 %: REPORT AS SUCH" if err > pipeline.ERROR_FLAG_SHARE * base else ""
+            if err > pipeline.SYSTEMIC_FAILURE_SHARE * len(rows):  # same rule as report
+                flag = "  > 50 %: SYSTEMIC FAILURE, cell excluded from every contrast"
             out.append(f"{p.name}: {err}/{len(rows)} unrecovered errors ({err / len(rows):.1%})"
                        f"{flag}")
     for s in status.values():
