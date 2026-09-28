@@ -4,8 +4,11 @@
 rows x (2 * n_players) columns, pitch coordinates in metres, consecutive windows
 shifted by 12 rows with a stable player order. Each 30 s segment is rebuilt by
 downloading only the windows needed to cover it (0, 20, 40, ... and the last one),
-not all ~56. Match ids: soccer F_<date>; handball <half> (one match, so halves are
-the only grouping); basketball P3 (one match).
+not all ~56. Match ids: soccer F_<date>; handball `tt-handball` (both halves are the
+same game, so they are one match for the grouped CV and the cluster bootstrap; the half
+stays in the segment, e.g. train-1st_fisheye_0-30); basketball P3 (one match).
+Clips ingested before this change used the half as match id: fix them without
+re-downloading with scripts/relabel_match.py.
 
     python scripts/teamtrack_to_long_csv.py <file_list.txt> data/raw/teamtrack
     -> data/raw/teamtrack/{soccer,handball,basketball}.csv
@@ -23,6 +26,18 @@ import numpy as np
 
 WIN, STEP = 240, 12
 SPORT = {"Soccer": "soccer", "Handball": "handball", "Basketball": "basketball"}
+
+
+HANDBALL_MATCH = "tt-handball"  # the one TeamTrack handball game, both halves
+
+
+def match_id(sport: str, seg: str) -> str:
+    """Match id of a TeamTrack segment (`seg` = file stem without the window index)."""
+    if sport == "Soccer":
+        return seg.split("_")[1]
+    if sport == "Handball":
+        return HANDBALL_MATCH  # the half ("1st"/"2nd", seg.split("_")[0]) is not a match
+    return seg.split("_")[0]
 
 
 def main() -> None:
@@ -59,12 +74,7 @@ def main() -> None:
         if np.isnan(xy).any():
             print(f"skip {sport}/{seg}: gaps after stitching", file=sys.stderr)
             continue
-        if sport == "Soccer":
-            match = seg.split("_")[1]
-        elif sport == "Handball":
-            match = seg.split("_")[0]
-        else:
-            match = seg.split("_")[0]
+        match = match_id(sport, seg)
         sp = SPORT[sport]
         if sp not in writers:
             fh = (out / f"{sp}.csv").open("w", newline="")

@@ -288,3 +288,18 @@ bash scripts/final_run.sh               # la corrida (reanudable)
   `prepare` lo avisa. El techo (12 m/s) está por encima del sprint humano (~10-11 m/s) y del
   p99 de todas las fuentes limpias (≤ 9 m/s).
 
+### D3 (2026-09-28). El balonmano de TeamTrack es un partido, no dos
+
+- **Qué cambia.** Las dos partes (`1st`, `2nd`) del único partido de balonmano de TeamTrack
+  comparten un `match_id` (`tt-handball`). La parte sigue en el segmento.
+  `scripts/teamtrack_to_long_csv.py` lo hace así en las ingestas nuevas. Para los clips ya
+  ingestados, `scripts/relabel_match.py` reescribe `match_id` sin volver a descargar. Se ha
+  aplicado sobre una copia de enlaces, `data/clips_tt_regroup` (434 clips; `data/clips` no se
+  toca). El loader `long-csv` ya no parte el id de partido por «-».
+- **Por qué.** El CV agrupado y el bootstrap por partido suponen que los grupos son
+  independientes. Dos mitades del mismo partido no lo son (mismos jugadores, mismo
+  tracker), y contarlas como dos partidos estrecha los IC del balonmano. El balonmano pasa
+  de 7 grupos a 6 (5 EIGD + 1 TeamTrack), que es lo que dice C5.
+- **Coste conocido.** Un grupo menos de balonmano: IC algo más anchos en los cortes por
+  deporte.
+
