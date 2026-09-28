@@ -213,7 +213,29 @@ la celda afectada y se informan las dos versiones en «Desviaciones».
 
 ## 11. Desviaciones
 
-(ninguna a fecha de registro)
+Todas las de 2026-09-28 son **anteriores a cualquier dato de modelo sobre el dataset
+final**: ningún modelo ha respondido todavía sobre `runs/final`. Cambian cómo se construye
+el conjunto de ítems, no las hipótesis, las celdas, los modelos ni la familia de Holm.
+
+### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
+
+- **Qué cambia.** Los clips de fútbol americano dejan de cortarse a un desfase fijo desde
+  el inicio de la grabación (`--trim-start-seconds 1.5`, C6). Pasan a ser **un clip por
+  jugada** que empieza en un instante uniforme en [snap + 0,5 s, fin de la jugada − 4 s]
+  (`ingest --source nfl --nfl-phase random --nfl-min-after-snap 0.5`). El snap es el
+  primer evento `ball_snap` o `autoevent_ballsnap`. La semilla sale de (gameId, playId).
+  Etiquetas `mid_play` y `random_phase`; el desfase respecto al snap queda en
+  `meta.snap_offset_s`. Las jugadas sin snap o demasiado cortas se descartan y el ingest
+  imprime el recuento.
+- **Por qué.** Con el recorte fijo, todos los clips NFL empiezan 1 s después del snap: es
+  la misma fase de la jugada en todos, y ningún otro deporte tiene esa alineación. Es un
+  atajo posible que el suavizado no toca (piloto 2).
+- **Coste conocido.** En BDB 2023 el tracking acaba poco después del pase, así que la
+  jugada dura una mediana de 3,2 s tras el snap (semana 1). Con clips de 4 s solo cabe
+  ~15-17 % de las jugadas: 29 de 200 en la semana 1, y ~1.400 en las 8 semanas. Basta
+  para 400 clips, pero es un subconjunto sesgado hacia jugadas largas (scrambles, sacks,
+  pases tardíos), y el desfase se concentra cerca del mínimo (mediana 0,7 s). Se informa
+  como limitación de la fuente.
 
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 

@@ -50,6 +50,10 @@ en vez de `uv run` (que re-sincroniza y vuelve a subir numpy, rompiendo MiniRock
 # 1. Fuente -> clips (metros, sin balón, diezmados a 5 Hz)
 motion-sport ingest --source metrica --input data/raw/Sample_Game_1 --out data/clips
 motion-sport ingest --source nfl --input data/raw/tracking_week_1.csv --out data/clips --max-plays 300
+# NFL: un clip por jugada en una fase aleatoria tras el snap (dataset final); imprime
+# cuántas jugadas se descartan por no tener snap o ser demasiado cortas
+motion-sport ingest --source nfl --input data/raw/nfl2023/week1.csv --out data/clips_nflrand \
+    --nfl-phase random --nfl-min-after-snap 0.5
 # CSV largo genérico (TeamTrack, extracción propia de rugby, kloppy...). Los nombres de
 # columna son un ejemplo: se mapean a los del export real.
 motion-sport ingest --source long-csv --input data/raw/teamtrack_handball.csv --out data/clips \

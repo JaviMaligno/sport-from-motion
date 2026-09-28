@@ -64,3 +64,85 @@ def test_nfl_without_frame_type_is_not_labelled_post_snap(tmp_path):
     p.write_text("\n".join(rows))
     clips = list(load_nfl_tracking(p, clip_seconds=3, stride_seconds=3, target_fps=10))
     assert clips and all(c.tags == ["play"] for c in clips)
+
+
+def _bdb2023(path, plays):
+    """BDB-2023-like CSV (no frameType, an `event` column). plays: {(game, play): (n_frames,
+    snap_frame or None)}; frames are 1-based, 10 Hz, 22 players + the ball."""
+    rows = ["gameId,playId,nflId,frameId,team,x,y,event"]
+    for (game, play), (n, snap) in plays.items():
+        for f in range(1, n + 1):
+            ev = "ball_snap" if f == snap else ("pass_forward" if f == n - 2 else "None")
+            rows += [f"{game},{play},{pid},{f},A,{10 + pid + f * 0.1},{20 + pid * 0.5},{ev}"
+                     for pid in range(22)]
+            rows.append(f"{game},{play},NA,{f},football,50,26,{ev}")
+    path.write_text("\n".join(rows))
+    return path
+
+
+def test_nfl_random_phase_one_clip_per_play_after_the_snap(tmp_path):
+    plays = {("g1", str(p)): (80, 6) for p in range(12)}
+    plays[("g1", "short")] = (40, 6)       # 0.5 s + 4 s after the snap does not fit
+    plays[("g1", "nosnap")] = (80, None)
+    p = _bdb2023(tmp_path / "w.csv", plays)
+    stats: dict = {}
+    clips = list(load_nfl_tracking(p, clip_seconds=4, phase="random", stats=stats))
+    assert stats == {"plays": 14, "clips": 12, "no_snap": 1, "too_short": 1, "too_few_players": 0}
+    assert len(clips) == len({c.clip_id for c in clips}) == 12
+    snap = 5  # frame 6 is index 5
+    for c in clips:
+        assert c.xy.shape == (20, 22, 2) and c.fps == 5.0  # 4 s decimated to 5 Hz
+        assert {"mid_play", "random_phase"} <= set(c.tags)
+        m = c.meta
+        assert m["snap_frame"] == snap and m["snap_offset_s"] == (m["start_frame"] - snap) / 10
+        assert 0.5 <= m["snap_offset_s"] <= (80 - 40 - snap) / 10
+        # the window is the play from start_frame on: x of player 0 = 10 + 0.1 * frame (yards)
+        assert np.isclose(c.xy[0, 0, 0], (10 + (m["start_frame"] + 1) * 0.1) * 0.9144, atol=1e-4)
+    offsets = {c.meta["snap_offset_s"] for c in clips}
+    assert len(offsets) > 3  # not one fixed phase
+
+
+def test_nfl_random_phase_is_deterministic_per_play(tmp_path):
+    a = _bdb2023(tmp_path / "a.csv", {("g1", "7"): (90, 6), ("g2", "3"): (90, 6)})
+    b = _bdb2023(tmp_path / "b.csv", {("g2", "3"): (90, 6), ("g9", "1"): (90, 6), ("g1", "7"): (90, 6)})
+    off = lambda p: {c.clip_id: c.meta["start_frame"] for c in load_nfl_tracking(p, phase="random")}
+    oa, ob = off(a), off(b)
+    assert oa == off(a)  # same file, same windows
+    assert all(ob[k] == v for k, v in oa.items())  # other plays in the file do not matter
+
+
+def test_nfl_random_phase_takes_the_first_snap_event_and_autoevent(tmp_path):
+    p = _bdb2023(tmp_path / "w.csv", {("g1", "1"): (60, None)})
+    text = p.read_text().splitlines()
+    # frame 3: autoevent_ballsnap; frame 10: a later ball_snap that must be ignored
+    text = [r.rsplit(",", 1)[0] + (",autoevent_ballsnap" if ",3,A," in r or ",3,football," in r
+                                    else ",ball_snap" if ",10,A," in r else "," + r.rsplit(",", 1)[1])
+            if i else r for i, r in enumerate(text)]
+    p.write_text("\n".join(text))
+    (c,) = load_nfl_tracking(p, phase="random", min_after_snap_s=0.0)
+    assert c.meta["snap_frame"] == 2
+
+
+def test_nfl_aligned_trim_is_unchanged_and_random_rejects_trim(tmp_path):
+    import pytest
+
+    p = _bdb2023(tmp_path / "w.csv", {("g1", "1"): (80, 6)})
+    clips = list(load_nfl_tracking(p, clip_seconds=3, stride_seconds=3, trim_start_s=1.5))
+    assert clips and all(c.tags == ["play", "mid_play"] for c in clips)
+    assert clips[0].clip_id == "nfl-g1-1-play-t1.5-00000"
+    with pytest.raises(ValueError):
+        list(load_nfl_tracking(p, phase="random", trim_start_s=1.5))
+    with pytest.raises(ValueError):
+        list(load_nfl_tracking(p, phase="snap"))
+
+
+def test_cli_ingest_nfl_random_phase_prints_summary(tmp_path, capsys):
+    from motion_sport import cli
+
+    p = _bdb2023(tmp_path / "w.csv", {("g1", "1"): (80, 6), ("g1", "2"): (30, 6)})
+    cli.main(["ingest", "--source", "nfl", "--input", str(p), "--out", str(tmp_path / "c"),
+              "--nfl-phase", "random", "--nfl-min-after-snap", "1.0"])
+    out = capsys.readouterr().out
+    assert "wrote 1 clips" in out and "2 plays -> 1 clips" in out and "1 too short" in out
+    (c,) = load_clips(tmp_path / "c")
+    assert "random_phase" in c.tags and c.meta["snap_offset_s"] >= 1.0

@@ -20,9 +20,16 @@ def _ingest(a) -> None:
     elif a.source == "sportvu":
         clips = loaders.load_sportvu_game(a.input, target_fps=a.target_fps, **kw)
     elif a.source == "nfl":
+        if a.nfl_phase == "random" and a.trim_start_seconds:
+            sys.exit("--trim-start-seconds is for --nfl-phase aligned; random places clips "
+                     "relative to the snap (--nfl-min-after-snap)")
+        nfl_stats: dict = {}
         clips = loaders.load_nfl_tracking(a.input, target_fps=a.target_fps,
                                           max_plays=a.max_plays,
-                                          trim_start_s=a.trim_start_seconds, **kw)
+                                          trim_start_s=a.trim_start_seconds,
+                                          phase=a.nfl_phase,
+                                          min_after_snap_s=a.nfl_min_after_snap,
+                                          stats=nfl_stats, **kw)
     elif a.source == "long-csv":
         if not (a.sport and a.fps):
             sys.exit("long-csv needs --sport and --fps")
@@ -38,6 +45,12 @@ def _ingest(a) -> None:
         c.save(a.out)
         n += 1
     print(f"wrote {n} clips to {a.out}")
+    if a.source == "nfl" and a.nfl_phase == "random":
+        st = nfl_stats
+        print(f"nfl random phase: {st['plays']} plays -> {st['clips']} clips; skipped "
+              f"{st['no_snap']} without a snap event, {st['too_short']} too short "
+              f"(< {a.nfl_min_after_snap:g} s after the snap + {a.clip_seconds:g} s), "
+              f"{st['too_few_players']} with too few observed players")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -61,7 +74,14 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--group-extra", help="long-csv: extra columns that split a match into "
                    "continuous streams (e.g. segment, playId)")
     g.add_argument("--trim-start-seconds", type=float, default=0.0,
-                   help="nfl: drop the first seconds of every play (mid-play clips)")
+                   help="nfl, --nfl-phase aligned: drop the first seconds of every play "
+                        "(mid-play clips at a fixed offset from the snap)")
+    g.add_argument("--nfl-phase", default="aligned", choices=["aligned", "random"],
+                   help="nfl: aligned = windows from the start of each play (old behaviour); "
+                        "random = one clip per play starting at a uniformly random time in "
+                        "[snap + --nfl-min-after-snap, play end - clip], seeded by (game, play)")
+    g.add_argument("--nfl-min-after-snap", type=float, default=0.5,
+                   help="nfl, --nfl-phase random: earliest window start, seconds after the snap")
     g.add_argument("--max-plays", type=int)
     g.add_argument("--n-toy", type=int, default=20)
     g.add_argument("--seed", type=int, default=0)
