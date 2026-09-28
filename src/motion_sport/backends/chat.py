@@ -200,7 +200,9 @@ def _messages_payload(model: str | None, req: Request) -> dict:
         content.append({"type": "image",
                         "source": {"type": "base64", "media_type": "image/png", "data": _b64(png)}})
     content.append({"type": "text", "text": req.prompt})
-    payload = {"max_tokens": req.max_tokens, "temperature": req.temperature,
+    # Claude 5.x thinks adaptively and counts thinking against max_tokens; without
+    # headroom a long thought leaves an empty answer (D21: Sonnet 5 motion/text, 36/400)
+    payload = {"max_tokens": req.max_tokens + REASONING_HEADROOM, "temperature": req.temperature,
                "messages": [{"role": "user", "content": content}]}
     if model:
         payload["model"] = model

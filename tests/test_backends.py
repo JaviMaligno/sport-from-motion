@@ -55,3 +55,9 @@ def test_bad_ids_fail_loudly():
         chat.complete("no-colon", REQ)
     with pytest.raises(chat.BackendError):
         chat.complete("nope:model", REQ)
+
+
+def test_anthropic_payload_has_reasoning_headroom():
+    from motion_sport.backends import chat
+    p = chat._messages_payload("m", chat.Request("hi", [], 1024, 0.0))
+    assert p["max_tokens"] == 1024 + chat.REASONING_HEADROOM
