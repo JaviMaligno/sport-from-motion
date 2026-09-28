@@ -4,6 +4,8 @@
     bash scripts/final_run.sh ... | python scripts/run_plan.py write runs/final
     # error summary: unrecovered errors per file, and planned cells with missing rows
     python scripts/run_plan.py check runs/final
+    # the items must be the pre-registered set (final_run.sh refuses to start otherwise)
+    python scripts/run_plan.py preflight runs/final 400 "<models>"
 
 `<items>/plan.json` is {"cells": {<prediction file stem>: planned rows}}. The stem is
 the file `motion-sport run` writes for that cell (pipeline._pred_path), so a planned
@@ -82,6 +84,48 @@ def check(items_dir: str | pathlib.Path) -> list[str]:
     return out
 
 
+# pre-registered item set (docs/preregistration.md section 3 and deviations D1-D2, 2026-09-28)
+PREFLIGHT_CONTROLS = {"player_mode": "random", "n_players": 10}
+
+
+def preflight(items_dir: str | pathlib.Path, n: int, models: list[str]) -> list[str]:
+    """-> the reasons the items are not the pre-registered set ([] = ok)."""
+    root = pathlib.Path(items_dir)
+    cfg = json.loads((root / "config.json").read_text())
+    bad = []
+    if cfg.get("preset") != "strict_smooth":
+        bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
+    controls = cfg.get("controls") or cfg.get("control_config") or {}
+    for key, want in PREFLIGHT_CONTROLS.items():
+        if controls.get(key) != want:
+            bad.append(f"controls.{key} is {controls.get(key)!r}, pre-registered {want!r}")
+    if not controls.get("max_speed_ms"):
+        bad.append(f"controls.max_speed_ms is {controls.get('max_speed_ms')!r}: the teleport "
+                   "ceiling must be set (D2)")
+    per = n // len(cfg["candidates"])
+    short = {s: k for s, k in cfg["clips_kept_by_sport"].items() if k < per}
+    if short:
+        bad.append(f"sports with fewer than {per} clips: {short}")
+    items = [json.loads(line) for line in (root / "items.jsonl").read_text().splitlines()
+             if line.strip()]
+    if not all("prompt_informed" in i for i in items):
+        bad.append("items without prompt_informed: re-run prepare")
+    reprs = {i["repr"] for i in items}
+    need = {"sheet", "text", "trails"} | ({"video"} if any(m.startswith("vertex:") for m in models)
+                                          else set())
+    if need - reprs:
+        bad.append(f"missing representations {sorted(need - reprs)}")
+    af = {i["clip_id"] for i in items if i["sport"] == "american_football"}
+    aligned = {i["clip_id"] for i in items
+               if i["sport"] == "american_football" and "random_phase" not in i.get("tags", [])}
+    if not af:
+        bad.append("no american_football clips")
+    elif aligned:
+        bad.append(f"{len(aligned)}/{len(af)} american_football clips not tagged random_phase: "
+                   "ingest NFL with --nfl-phase random (D1)")
+    return bad
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -89,8 +133,18 @@ def main() -> None:
     w.add_argument("items")
     c = sub.add_parser("check", help="unrecovered errors and missing planned rows")
     c.add_argument("items")
+    f = sub.add_parser("preflight", help="the items must be the pre-registered set")
+    f.add_argument("items")
+    f.add_argument("n", type=int, help="clips per cell (N of final_run.sh)")
+    f.add_argument("models", help="space-separated model ids (MODELS of final_run.sh)")
     a = ap.parse_args()
-    if a.cmd == "write":
+    if a.cmd == "preflight":
+        bad = preflight(a.items, a.n, a.models.split())
+        if bad:
+            sys.exit("preflight failed:\n  " + "\n  ".join(bad))
+        cfg = json.loads((pathlib.Path(a.items) / "config.json").read_text())
+        print(f"preflight ok: {a.items} ({cfg['preset']}, {cfg['clips_kept_by_sport']})")
+    elif a.cmd == "write":
         path = write_plan(a.items, sys.stdin.read().splitlines())
         print(f"{path}: {len(json.loads(path.read_text())['cells'])} planned cells")
     else:

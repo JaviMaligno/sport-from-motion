@@ -5,6 +5,7 @@ import os
 import pathlib
 
 import numpy as np
+import pytest
 
 from motion_sport.loaders import load_long_csv
 from motion_sport.schema import Clip, load_clips
@@ -173,3 +174,57 @@ def test_primary_view_restricts_specialists_to_the_models_clips(tmp_path):
     # without the flag the specialist keeps every clip
     info2 = pv.build_view(items, tmp_path / "view2")
     assert info2["restricted"] == {} and (tmp_path / "view2" / "predictions" / base.name).is_symlink()
+
+
+def _final_like(tmp_path, *, controls=None, af_tags=("mid_play", "random_phase"),
+                preset="strict_smooth", reprs=("sheet", "text", "trails", "video")):
+    root = tmp_path / "final"
+    root.mkdir()
+    sports = ["american_football", "basketball", "handball", "soccer"]
+    ctrl = {"n_players": 10, "player_mode": "random", "space": "spread", "rotate": True,
+            "tempo": None, "n_frames": 20, "drop_team": True, "smooth": 2.0, "max_speed_ms": 12.0}
+    ctrl.update(controls or {})
+    (root / "config.json").write_text(json.dumps({
+        "preset": preset, "controls": ctrl, "candidates": sports,
+        "clips_kept_by_sport": {s: 100 for s in sports}}))
+    items = [{"clip_id": f"{s}-{k}", "sport": s, "repr": r, "prompt_informed": "...",
+              "tags": list(af_tags) if s == "american_football" else []}
+             for s in sports for k in range(3) for r in reprs]
+    (root / "items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
+    return root
+
+
+MODELS = ["azure-openai:gpt-5.6-sol", "vertex:gemini-3.1-pro-preview"]
+
+
+def test_preflight_accepts_the_preregistered_set(tmp_path):
+    assert _script("run_plan").preflight(_final_like(tmp_path), 400, MODELS) == []
+
+
+@pytest.mark.parametrize("kw, expect", [
+    ({"controls": {"player_mode": "central"}}, "controls.player_mode is 'central'"),
+    ({"controls": {"n_players": 12}}, "controls.n_players is 12"),
+    ({"controls": {"max_speed_ms": None}}, "controls.max_speed_ms is None"),
+    ({"preset": "strict"}, "preset is 'strict'"),
+    ({"af_tags": ("play", "mid_play")}, "3/3 american_football clips not tagged random_phase"),
+    ({"reprs": ("sheet", "text", "trails")}, "missing representations ['video']"),
+])
+def test_preflight_rejects_what_is_not_preregistered(tmp_path, kw, expect):
+    bad = _script("run_plan").preflight(_final_like(tmp_path, **kw), 400, MODELS)
+    assert len(bad) == 1 and bad[0].startswith(expect)
+
+
+def test_preflight_cli_exit_code(tmp_path):
+    import subprocess
+    import sys
+
+    ok = _final_like(tmp_path)
+    cmd = [sys.executable, str(SCRIPTS / "run_plan.py"), "preflight", str(ok), "400", " ".join(MODELS)]
+    env = {**os.environ, "PYTHONPATH": str(SCRIPTS.parent / "src")}
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and "preflight ok" in r.stdout
+    cfg = json.loads((ok / "config.json").read_text())
+    cfg["controls"]["player_mode"] = "central"
+    (ok / "config.json").write_text(json.dumps(cfg))
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert r.returncode == 1 and "controls.player_mode" in r.stderr

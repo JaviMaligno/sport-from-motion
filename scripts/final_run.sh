@@ -63,29 +63,10 @@ commands_for() {  # one `motion-sport run` per line, in run order
   done
 }
 
-preflight() {  # the items must be the pre-registered set
-  .venv/bin/python - "$ITEMS" "$N" "$MODELS" <<'EOF' || exit 1
-import json, pathlib, sys
-root, n, models = pathlib.Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split()
-cfg = json.loads((root / "config.json").read_text())
-bad = []
-if cfg.get("preset") != "strict_smooth":
-    bad.append(f"preset is {cfg.get('preset')!r}, pre-registered strict_smooth")
-per = n // len(cfg["candidates"])
-short = {s: k for s, k in cfg["clips_kept_by_sport"].items() if k < per}
-if short:
-    bad.append(f"sports with fewer than {per} clips: {short}")
-items = [json.loads(l) for l in (root / "items.jsonl").read_text().splitlines() if l.strip()]
-if not all("prompt_informed" in i for i in items):
-    bad.append("items without prompt_informed: re-run prepare")
-reprs = {i["repr"] for i in items}
-need = {"sheet", "text", "trails"} | ({"video"} if any(m.startswith("vertex:") for m in models) else set())
-if need - reprs:
-    bad.append(f"missing representations {sorted(need - reprs)}")
-if bad:
-    sys.exit("preflight failed:\n  " + "\n  ".join(bad))
-print(f"preflight ok: {root} ({cfg['preset']}, {cfg['clips_kept_by_sport']})")
-EOF
+preflight() {  # the items must be the pre-registered set (scripts/run_plan.py preflight):
+  # strict_smooth, N=10 random players, teleport ceiling set, NFL at a random phase (D1-D2),
+  # >= N/4 clips per sport, informed prompts and every planned representation
+  .venv/bin/python scripts/run_plan.py preflight "$ITEMS" "$N" "$MODELS" || exit 1
 }
 
 error_summary() {  # unrecovered errors per file (> 2 % flagged) + planned cells with missing rows

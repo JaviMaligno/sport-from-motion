@@ -334,3 +334,15 @@ resolvía de forma mecánica:
 .venv/bin/python scripts/run_plan.py check runs/final
 ```
 
+### D5 (2026-09-28). El preflight exige el conjunto de ítems nuevo
+
+- **Qué cambia.** Además de lo que ya comprobaba (sección 3), el lanzador se niega a
+  arrancar si en `config.json` (`controls`) no están `player_mode = random` y
+  `n_players = 10` (hueco A14, decidido: selección aleatoria), si `max_speed_ms` no está
+  fijado (D2), o si algún clip de fútbol americano de los ítems no lleva la etiqueta
+  `random_phase` (D1). El preflight pasa a `scripts/run_plan.py preflight` para poder
+  probarlo. `final_run.sh` lo llama con los mismos argumentos.
+- **Por qué.** El `runs/final` construido el 2026-09-27 (selección central, sin techo de
+  velocidad, NFL con desfase fijo) no pasa: hay que reconstruirlo antes de la corrida. El
+  preflight lo garantiza en vez de fiarlo a la memoria.
+
