@@ -454,6 +454,32 @@ Jev es un modelo de decisión tipada, solo texto, y no tiene hipótesis confirma
   988 tokens (Opus `motion/text`). No se puede descartar que el razonamiento adaptativo se
   acortara por el tope sin llegar a cortarse.
 
+
+### Segunda versión entera de la celda (2026-09-29, cierra A17)
+
+ Se re-corrieron las 400 filas de Sonnet 5
+`motion/text` con el arreglo (`d6a3833`) en `runs/final-sens2`. El recurso fue otro: el mismo
+modelo (`claude-sonnet-5`) en un Foundry de Azure distinto (`azure-anthropic:`, Sweden Central),
+porque Vertex no se quiso volver a usar por coste y el Foundry de la sandbox sigue bloqueado por
+Anthropic. Resultados:
+- 0 errores; **129 de 400 respuestas superan los 1.024 tokens** de salida (máx. 12.368). Con el
+  tope, Sonnet recortaba su razonamiento en texto, no solo fallaba en 40 filas.
+- Acierto 0,35 (pre-registrado 0,28). `text_vs_image` = **+0,07 [0,01; 0,14], p = 0,019**
+  (pre-registrado +0,005 [−0,05; 0,07], p = 0,90), frente a la misma `motion/sheet`
+  pre-registrada. Va en la dirección contraria a H3 (el texto no empeora; mejora algo). Con el
+  mismo rango en la familia de Holm de 20 no sería significativo. **No cambia la clasificación
+  §6 de Sonnet** (depende de `motion/sheet` y su pc-acc) **ni la conclusión sobre H3**
+  (sin evidencia de que el texto empeore).
+- **El tope no afectó a las celdas de imagen.** Diagnóstico sobre los 100 primeros clips de
+  Sonnet `motion/sheet` con margen: mediana de salida 151 → 144 tokens, ninguna por encima de
+  1.024, acierto 0,29 → 0,29, misma respuesta en el 68 % (dentro de la variación entre réplicas,
+  0,55-0,67). En la corrida pre-registrada ninguna celda de imagen de Opus ni de Sonnet llega a
+  900 tokens (medianas 137-459). Los contrastes `order` y `motion_over_shape` no dependen del
+  tope. Opus `motion/text` (1 % a ≥ 900 tokens) no se pudo repetir: Opus no está desplegado en
+  ese Foundry. Su `text_vs_image` ya era +0,05, no significativo, y el margen solo podría
+  subir la celda de texto.
+- Coste: 8,38 USD (celda) + ~1,5 USD (diagnóstico), facturados en ese Foundry, no en Vertex.
+
 ## 12. Coste medido y tiempo
 
 Precios de lista de `scripts/estimate_run.py` (anexo B), aplicados a los tokens de
