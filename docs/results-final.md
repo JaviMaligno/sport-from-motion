@@ -553,12 +553,11 @@ instantes, un prompt, 400 clips de 151 partidos):
    H3 «no se cumple»: el IC de sol y de terra admite −0,07 y −0,08.
 5. Nada sobre personas (A13), ni sobre si los resultados valen para otros deportes, otras
    duraciones, otras representaciones u otros prompts.
-6. Que la celda de Sonnet 5 `motion/text` esté medida como pedía el pre-registro:
-   - corrió con un tope que no era el pre-registrado (D21);
-   - la segunda versión que exige el §9 solo existe en parte (40 de 400 filas; A17).
+6. Que la celda de Sonnet 5 `motion/text` pre-registrada mida a Sonnet en igualdad con los
+   demás: corrió con un tope de razonamiento que no era el pre-registrado (D21). La segunda
+   versión entera, con margen (A17, sección 11), sube su exactitud de 0,28 a 0,35 y su
+   `text_vs_image` a +0,07, sin cambiar ninguna clasificación ni la conclusión sobre H3.
 
-   Su efecto en las conclusiones es nulo en la sensibilidad parcial, pero no está
-   cerrado.
 7. Que la firma de cada fuente no influya. Dentro del fútbol, la fuente se reconoce por el
    movimiento (A15). En la NFL no se puede medir.
 
