@@ -10,20 +10,15 @@ hermano de [*Where's the ball?*](https://github.com/JaviMaligno/wheres-the-ball)
 - Resultados de la corrida final: [`docs/results-final.md`](docs/results-final.md)
 - Huecos abiertos y cerrados: [`docs/gaps.md`](docs/gaps.md)
 
-> ## ⚠️ Vive aquí de forma temporal: hay que extraerlo
+> **Origen.** El experimento nació dentro del repo del blog (`personal-website`,
+> `experiments/sport-from-motion/`) y se extrajo aquí con su historia completa el
+> 2026-09-29. No depende de `wheres-the-ball`: los loaders de Metrica y SportVU replican
+> sus formatos, pero no los importan.
 >
-> Este directorio está dentro de `personal-website` **solo mientras no exista su
-> propio repo**. Está aislado a propósito, así que moverlo es copiar la carpeta:
->
-> - no importa nada de fuera de `experiments/sport-from-motion/`;
-> - no depende de `wheres-the-ball`. Los loaders de Metrica y SportVU replican los
->   formatos de `wheres_the_ball/data/field_tracking.py`, pero no los importan;
-> - no lo toca el build de Astro, y datos y resultados (`data/`, `runs/`) están en
->   `.gitignore`.
->
-> **Destino pendiente de decidir:** subpaquete de `wheres-the-ball` (si acaba
-> compartiendo datos y loaders) o repo propio. Al extraerlo hay que mover también las
-> referencias a este directorio en los borradores del blog, si los hay.
+> **Datos.** No se redistribuye ningún dato (`data/` y `runs/` están en `.gitignore`).
+> Cada fuente tiene su licencia (NFL Big Data Bowl, EIGD-H CC BY-NC-SA, TeamTrack MIT,
+> SportVU, Metrica, SkillCorner); cómo obtenerlas está en [`docs/datasets.md`](docs/datasets.md)
+> y en los scripts de `scripts/`.
 
 ## Estado
 
@@ -128,7 +123,14 @@ motion-sport report --items runs/toy/items
 
 ## Modelos en Azure
 
-Mismas variables que `experiments/judge-bias`; ver [`.env.example`](.env.example).
+Ver [`.env.example`](.env.example). Los lanzadores (`scripts/final_run.sh`,
+`scripts/pilot_models.sh`) leen además:
+
+| Variable | Para qué |
+|---|---|
+| `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY_FILE` (por defecto `~/.azure-openai-key`) | GPT en Azure OpenAI; la clave se lee del fichero y nunca se imprime |
+| `VERTEX_PROJECT`, `GCLOUD_BIN` | Gemini y Claude en Vertex; sin `VERTEX_PROJECT` esas rutas fallan con un error claro |
+| `~/.openrouter-key` | Jev por OpenRouter |
 
 | Id | Ruta | Variables |
 |---|---|---|

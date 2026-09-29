@@ -15,7 +15,7 @@ export AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-https://australiaeast.api.
 [ -z "${AZURE_OPENAI_KEY:-}" ] && [ -f "${AZURE_OPENAI_KEY_FILE:-$HOME/.azure-openai-key}" ] && export AZURE_OPENAI_KEY="$(tr -d '\n' < "${AZURE_OPENAI_KEY_FILE:-$HOME/.azure-openai-key}")"
 # Vertex
 export GCLOUD_BIN=${GCLOUD_BIN:-$HOME/Downloads/google-cloud-sdk/bin/gcloud}
-export VERTEX_PROJECT=${VERTEX_PROJECT:?set VERTEX_PROJECT to your GCP project}
+export VERTEX_PROJECT=${VERTEX_PROJECT:-}  # your GCP project; Vertex routes fail clearly if unset
 
 mkdir -p "$ITEMS/logs"
 for m in $MODELS; do

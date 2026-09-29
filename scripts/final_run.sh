@@ -49,7 +49,7 @@ JEV_CELLS="motion:text:neutral:1:$N motion_shuffled:text:neutral:1:$N formation:
 export AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-https://australiaeast.api.cognitive.microsoft.com}
 # Vertex
 export GCLOUD_BIN=${GCLOUD_BIN:-$HOME/Downloads/google-cloud-sdk/bin/gcloud}
-export VERTEX_PROJECT=${VERTEX_PROJECT:?set VERTEX_PROJECT to your GCP project}
+export VERTEX_PROJECT=${VERTEX_PROJECT:-}  # your GCP project; Vertex routes fail clearly if unset
 if [ "$DRY_RUN" != 1 ]; then  # keys are read only for a real run, and never echoed
   [ -z "${AZURE_OPENAI_KEY:-}" ] && [ -f "${AZURE_OPENAI_KEY_FILE:-$HOME/.azure-openai-key}" ] && export AZURE_OPENAI_KEY="$(tr -d '\n' < "${AZURE_OPENAI_KEY_FILE:-$HOME/.azure-openai-key}")"
   [ -z "${OPENROUTER_API_KEY:-}" ] && [ -f ~/.openrouter-key ] && export OPENROUTER_API_KEY="$(tr -d '\n' < ~/.openrouter-key)"
