@@ -12,6 +12,12 @@
 > evidencia, y el texto original sigue en el commit `745f699`. A partir de la primera
 > llamada a un modelo sobre `runs/final`, la regla de arriba vuelve a ser estricta.
 
+> **Nota (2026-09-29).** La corrida terminó el 2026-09-28 a las 23:26. La única
+> desviación posterior a los datos es **D21** (sección 11): un bug del harness en la ruta
+> Anthropic, arreglado después de la corrida. No cambia ningún número pre-registrado, y lo
+> corregido se informa solo como sensibilidad. Resultados en
+> [`results-final.md`](results-final.md).
+
 Lanzador: [`scripts/final_run.sh`](../scripts/final_run.sh). Vista del análisis primario:
 [`scripts/primary_view.py`](../scripts/primary_view.py). Coste y tiempo:
 [`scripts/estimate_run.py`](../scripts/estimate_run.py).
@@ -373,6 +379,11 @@ desviaciones cambian cómo se construye el conjunto de ítems, añaden una celda
 hipótesis, las celdas primarias ni los modelos. La familia de Holm solo cambia por la
 regla de fallo sistémico (D12), que saca contrastes que no miden al modelo.
 
+> **Excepción: D21 es POSTERIOR a los datos.** Se escribió al terminar la corrida, con
+> todas las respuestas de `runs/final` y `runs/final-d8` ya vistas. No cambia ningún
+> número pre-registrado: los resultados primarios siguen saliendo de `runs/final` tal
+> como quedó, y lo corregido es solo una sensibilidad.
+
 Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00):
 
 | # | Qué cambia | Por qué | Evidencia | Commit |
@@ -396,6 +407,8 @@ Todos los cambios desde el commit del pre-registro (`745f699`, 2026-09-27 21:00)
 | D17 | `runs/final` y `runs/final-d8` reconstruidos; especialistas; test de fuga por fuente dentro del fútbol | D10 y D16 cambian los clips | preflights en verde; especialistas y `source_id.json` | `78f144d` |
 | D18 | TeamTrack: el (0, 0) exacto es un jugador no detectado (NaN); una pista exactamente constante en la ventana no es un jugador (`drop_frozen`); conjuntos reconstruidos desde `pool_final4` / `pool_d8_final4` | puntos quietos en una esquina contaban como jugadores | verificador: 19 de 63 clips de balonmano de TeamTrack en `runs/final-v3`; auditoría por fuente; 0 jugadores quietos en los conjuntos nuevos | `fc42605`, `faaac76`, `86806f4`, `381d14e` |
 | D19 | Dos pistas a ≤ 5 cm en toda la ventana son un jugador con dos identificadores (`drop_duplicates`); un tramo exactamente recto de ≥ 4 s es interpolado, faltante (`drop_linear`); conjuntos reconstruidos | el modelo veía 9 jugadores dibujados como 10, y en TeamTrack pistas interpoladas como jugadores | verificador: SportVU 0021500368 segmento 12, posición 389 de los 400; par real más cercano en 4 s a 0,31 m (NFL 0,53 m); 0 de 434.859 pistas de otras fuentes rectas 4 s, 94 de TeamTrack | `f42e8ea`, `3a80332`, `20f421e` |
+| D20 | A16 decidido: no se aplica ninguna regla nueva; matices de D19; paso real entre instantáneas | ninguna regla por fotogramas cambia un clip de las muestras pagadas | máx. 6 de 20 fotogramas a ≤ 5 cm en los 400 y 9 de 40 en los 300 de A7b | `7801b55` |
+| D21 (**POST-datos**) | Ruta Anthropic: margen de razonamiento que el §4 pre-registraba y no se aplicaba; sensibilidad sobre los 40 errores de Sonnet 5 `motion/text` | bug del harness (§9): Sonnet 5 piensa de forma adaptativa y el razonamiento cuenta contra `max_tokens` = 1024 | 40 de 40 errores acaban exactamente en 1.024 tokens de salida; ninguna otra celda llega al tope | `d6a3833` |
 
 ### D1 (2026-09-28). Fase de la jugada NFL aleatoria respecto al snap
 
@@ -1374,6 +1387,73 @@ Sin datos de ningún modelo en `runs/final` ni en `runs/final-d8` (solo especial
   deportes y condiciones, y queda anotado aquí.
 - **Errata:** `gaps.md` C4 citaba `runs/final2-xs` para el 0,95 del conjunto final; es
   `runs/final5-xs`.
+
+### D21 (2026-09-28, POSTERIOR a los datos). Margen de razonamiento en la ruta Anthropic
+
+Escrita **después** de ver todas las respuestas de la corrida final. Los números
+pre-registrados no cambian: `runs/final` queda intacto y es la fuente del análisis
+primario. Lo corregido se informa solo como sensibilidad.
+
+- **Qué pasó.** El §4 pre-registra `--max-tokens 1024` «más el margen de razonamiento
+  del backend, 16.384». Las rutas de OpenAI (Azure) y Gemini (Vertex) sumaban ese margen.
+  La ruta Anthropic (`vertex-anthropic:`, que usan Opus 5.5 y Sonnet 5) **no lo sumaba**:
+  enviaba `max_tokens = 1024`. Claude 5.x razona de forma adaptativa y ese razonamiento
+  cuenta contra `max_tokens`. Cuando razona largo, se agota el presupuesto antes de la
+  respuesta, y la respuesta sale vacía o cortada. Es un bug del harness en el sentido del
+  §9: el ajuste pre-registrado no se aplicaba en una ruta.
+- **Evidencia** (`scripts/analysis/token_ceiling.py`, sobre `usage.output_tokens` de cada
+  fila; `runs/analysis-final/token_ceiling.{txt,json}`):
+  - Sonnet 5 `motion/text`: en la pasada 1, 102 de 400 respuestas no se pudieron leer (91
+    sin JSON y 11 con JSON mal formado). La pasada 2, con los mismos ajustes (§8), recuperó
+    62. Quedan **40 errores** (10 %): 36 sin JSON y 4 con JSON mal formado. **Los 40
+    acaban exactamente en 1.024 tokens de salida**, y ninguna respuesta válida llega a
+    1.024. Otras 14 respuestas válidas llegan a 924 tokens o más, y 6 de ellas están entre 1.000
+    y 1.019, todas equivocadas. Los errores se reparten así: 14 de fútbol americano, 11 de
+    baloncesto, 9 de fútbol y 6 de balonmano.
+  - En el resto de celdas de la ruta Anthropic no hay ninguna fila en el tope, tampoco en
+    A7b. Opus 5.5 `motion/text` llega a 988 tokens (3 filas en 924 o más),
+    `kinematics_solo/sheet` a 975 y `kinematics/sheet` a 967. Todas las demás celdas se
+    quedan por debajo de 870. Ninguna otra celda de la ruta termina con errores. Sonnet
+    `kinematics/sheet` tuvo 1 JSON mal formado («Extra data») en la pasada 1, que se
+    recuperó en la pasada 2.
+  - Lo que no se puede descartar: el razonamiento adaptativo podría ajustar su longitud al
+    presupuesto que recibe. Entonces el tope habría acortado el razonamiento también en
+    celdas donde ninguna respuesta se cortó. No se ha medido.
+- **Arreglo** (commit `d6a3833`, 2026-09-28 23:28, después del final de la corrida):
+  `_messages_payload` envía `max_tokens = 1024 + REASONING_HEADROOM`, como las otras
+  rutas, con un test. Ninguna fila de `runs/final` ni de `runs/final-d8` se ha re-corrido
+  con el arreglo.
+- **Sensibilidad** (`runs/final-sens`, una copia con los ítems enlazados y las predicciones
+  copiadas): solo se re-corrieron las **40 filas con error** de Sonnet 5 `motion/text`,
+  con el arreglo. Se recuperan 39 y queda 1 JSON mal formado. De las 39, aciertan 18 (6 de
+  fútbol americano, 6 de baloncesto y 6 de fútbol). Las recuperadas usan una mediana de
+  1.122 tokens de salida, con un máximo de 8.693. Coste: 1,40 USD, unos 4 minutos.
+  Cambian esas 40 filas y ninguna otra (comparado fichero a fichero con `runs/final`).
+  - Exactitud de la celda: 0,28 → 0,33 [0,23; 0,43]. Exactitud corregida por prior: 0,32
+    → 0,38.
+  - `text_vs_image` de Sonnet: d +0,005 → +0,05 [−0,005; 0,12], p 0,90 → 0,085, p_holm
+    1,00 → 1,00.
+  - **No cambia ninguna decisión de Holm ni ninguna clasificación del §6.**
+- **Los errores no eran al azar.** Las 39 recuperadas aciertan el 46 %, frente al 31 %
+  (113 de 360) de las respuestas válidas de la celda original. Además se concentran en
+  fútbol americano y baloncesto. Contar esos errores como fallo (§8) empujaba `motion/text`
+  hacia abajo, en la dirección de H3. Aun así, con la sensibilidad H3 sigue sin evidencia.
+- **Conflicto con el §9: no se cumple.** El §9 exige, ante un bug del harness visto
+  después de los datos, repetir **entera** la celda afectada e informar las dos versiones.
+  Aquí solo se re-corrieron las 40 filas con error, no las 400. Las 360 filas válidas se
+  obtuvieron con el tope, y algunas podrían cambiar con el margen, sobre todo las 14 que
+  llegan a 924 tokens o más. La sensibilidad parcial es, por tanto, una aproximación a la
+  segunda versión, no la segunda versión. Falta re-correr las 400 filas de Sonnet 5
+  `motion/text` con el arreglo, en una copia, como segunda versión informada al lado de
+  la pre-registrada. El coste medido de la celda da unos 6 USD y minutos de reloj. Esta
+  fase de análisis no tenía autorizado ningún gasto en API, así que queda abierta como
+  hueco A17 en [`gaps.md`](gaps.md). Las demás celdas de la ruta Anthropic no muestran el
+  efecto del bug (ninguna fila en el tope) y no se re-corren. Queda dicho arriba lo que eso
+  no descarta.
+- **Qué número manda.** Los pre-registrados, con los 40 errores contados como fallo y la
+  celda marcada (`!`, 40/400), son los primarios. Los de `runs/final-sens` se citan
+  siempre como sensibilidad, al lado de los pre-registrados
+  ([`results-final.md`](results-final.md)).
 
 ## Anexo A. Dimensionado (del piloto 4, 400 clips, 55 partidos)
 

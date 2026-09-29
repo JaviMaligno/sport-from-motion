@@ -158,7 +158,13 @@ def main() -> None:
                       "thinking_tokens", "usd", "lost_attempts", "lost_usd_approx"):
                 k[f] += c.get(f, 0)
     summary = [{"set": s, "model": m, **dict(v)} for (s, m), v in sorted(by_model.items())]
-    total = sum(v["usd"] for v in summary)
+    # A sensitivity copy (--only-changed) is not part of the run the estimate covers:
+    # the run total is every other set, and each set also gets its own subtotal.
+    by_set = collections.Counter()
+    for v in summary:
+        by_set[v["set"]] += v["usd"]
+    run_total = sum(u for s, u in by_set.items() if s not in ref)
+    total = sum(by_set.values())
     total_lost = sum(v.get("lost_usd_approx", 0) for v in summary)
     print(f"{'set':6} {'model':42} {'rows':>6} {'in Mtok':>8} {'out Mtok':>8} {'think':>7} "
           f"{'USD':>8} {'lost':>5} {'~USD':>6}")
@@ -166,9 +172,16 @@ def main() -> None:
         print(f"{v['set']:6} {v['model']:42} {v['rows']:6d} {v['input_tokens'] / 1e6:8.2f} "
               f"{v['output_tokens'] / 1e6:8.2f} {v['thinking_tokens'] / 1e6:7.2f} {v['usd']:8.2f} "
               f"{v.get('lost_attempts', 0):5d} {v.get('lost_usd_approx', 0):6.2f}")
-    print(f"TOTAL USD {total:.2f} (+ ~{total_lost:.2f} for retried attempts not in the files)")
+    for s_, u in sorted(by_set.items()):
+        print(f"SUBTOTAL {s_}: USD {u:.2f}" + (" (sensitivity, not in the run)" if s_ in ref else ""))
+    print(f"RUN TOTAL USD {run_total:.2f} (sets: {', '.join(s_ for s_ in sorted(by_set) if s_ not in ref)}; "
+          f"+ ~{total_lost:.2f} for retried attempts not in the files)")
+    if ref:
+        print(f"ALL SETS incl. sensitivity USD {total:.2f}")
     res = {"prices_usd_per_mtok": PRICES, "cells": cells, "by_model": summary,
-           "total_usd": total, "lost_usd_approx": total_lost}
+           "by_set_usd": dict(by_set), "run_total_usd": run_total,
+           "sensitivity_sets": sorted(ref), "total_usd_incl_sensitivity": total,
+           "lost_usd_approx": total_lost}
     if a.logs:
         res["wall_clock"] = wall_clock(pathlib.Path(a.logs))
         for k, v in res["wall_clock"].items():

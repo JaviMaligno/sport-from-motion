@@ -7,6 +7,8 @@ hermano de [*Where's the ball?*](https://github.com/JaviMaligno/wheres-the-ball)
 - Diseño completo, controles de fugas y condiciones: [`docs/design.md`](docs/design.md)
 - Qué datasets usar y qué hay que construir (rugby): [`docs/datasets.md`](docs/datasets.md)
 - Pre-registro de la corrida final de modelos: [`docs/preregistration.md`](docs/preregistration.md)
+- Resultados de la corrida final: [`docs/results-final.md`](docs/results-final.md)
+- Huecos abiertos y cerrados: [`docs/gaps.md`](docs/gaps.md)
 
 > ## ⚠️ Vive aquí de forma temporal: hay que extraerlo
 >
@@ -25,7 +27,25 @@ hermano de [*Where's the ball?*](https://github.com/JaviMaligno/wheres-the-ball)
 
 ## Estado
 
-Harness probado con datos reales. **Piloto 1 (fútbol vs baloncesto) hecho**: ver
+**Corrida final pre-registrada hecha y analizada** (2026-09-28, `runs/final` y
+`runs/final-d8`; resultados en [`docs/results-final.md`](docs/results-final.md)).
+400 clips de 151 partidos y 4 deportes, 5 modelos de chat más Jev, familia de Holm de
+20 contrastes:
+
+- Con la regla del §6, **Claude Opus 5.5 es el único que «lee el orden temporal»**:
+  barajar los instantes le quita 10 puntos [5; 16] (p_holm 0,004). El efecto se
+  concentra en fútbol americano y baloncesto, y reaparece a 8 s sin fútbol americano
+  (exploratorio).
+- gpt-5.6-sol, gpt-5.6-terra, Claude Sonnet 5 y Gemini 3.1 Pro quedan «sin evidencia de
+  que vea movimiento». Es ausencia de evidencia: el IC admite hasta 3-6 puntos de efecto
+  del orden.
+- Todos muy por debajo de los especialistas sobre los mismos clips (0,47 como máximo,
+  frente a 0,83 de MiniRocket).
+- Una desviación posterior a los datos, **D21** (margen de razonamiento de la ruta
+  Anthropic): la sensibilidad no cambia ninguna decisión de Holm ni ninguna
+  clasificación, pero la re-corrida entera de la celda afectada queda abierta (A17).
+
+Antes: piloto 1 (fútbol vs baloncesto) en
 [`docs/pilot-2026-09-27.md`](docs/pilot-2026-09-27.md). `loaders/synthetic.py` sigue
 siendo solo para pruebas.
 

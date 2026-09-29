@@ -162,6 +162,26 @@ def secondary_table(rep: dict, pred) -> str:
     return table(["modelo", "a − b", "d", "IC 95 %", "p (sin corregir)", "n"], rows)
 
 
+ESTIMATE_USD = 575.95  # scripts/estimate_run.py, docs/preregistration.md annex B
+
+
+def cost_totals(cost: dict) -> str:
+    """Run total (every set but the sensitivity copies) against the estimate, then the
+    sensitivity apart; old cost.json files without the split fall back to one total."""
+    if "run_total_usd" not in cost:
+        return (f"Total: {cost['total_usd']:.2f} USD (+ ≈ {cost['lost_usd_approx']:.2f} de "
+                "reintentos que no quedan en los ficheros).")
+    run, by_set = cost["run_total_usd"], cost["by_set_usd"]
+    sens = sum(by_set[s] for s in cost["sensitivity_sets"])
+    parts = " + ".join(f"{s} {u:.2f}" for s, u in sorted(by_set.items())
+                       if s not in cost["sensitivity_sets"])
+    return (f"Total de la corrida ({parts}): **{run:.2f} USD**, frente a {ESTIMATE_USD:.2f} "
+            f"estimados ({run - ESTIMATE_USD:+.2f}; {100 * (run / ESTIMATE_USD - 1):+.1f} %). "
+            f"Aparte, la sensibilidad D21: {sens:.2f} USD (con ella, "
+            f"{cost['total_usd_incl_sensitivity']:.2f}). Más ≈ {cost['lost_usd_approx']:.2f} "
+            "de reintentos que no quedan en los ficheros.")
+
+
 def main() -> None:
     d = pathlib.Path(sys.argv[1])
     J = lambda f: json.loads((d / f).read_text())  # noqa: E731
@@ -341,8 +361,7 @@ def main() -> None:
                        f"{v['output_tokens'] / 1e6:.2f}", f"{v['thinking_tokens'] / 1e6:.2f}",
                        f"{v['usd']:.2f}", str(v.get("lost_attempts", 0)),
                        f"{v.get('lost_usd_approx', 0):.2f}"] for v in cost["by_model"]]), "",
-               f"Total: {cost['total_usd']:.2f} USD (+ ≈ {cost['lost_usd_approx']:.2f} de reintentos "
-               "que no quedan en los ficheros).", ""]
+               cost_totals(cost), ""]
         if cost.get("wall_clock"):
             md += [table(["log", "inicio", "fin", "horas"],
                          [[k, v["start"], v["end"], f"{v['hours']:.2f}"]
