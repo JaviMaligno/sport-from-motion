@@ -218,10 +218,21 @@ def run_job(args, rows, cond, fold, seed, device, amp):
         fit = [train_items[i] for i in sorted(idx[n_cal:])]
         if args.smoke:
             fit, calib, test = fit[:32], calib[:16], test[:16]
-        curve = []
+        curve, snaps = [], []
 
         def on_epoch(e):
-            if args.eval_each_epoch:
+            if args.early_stop:
+                # DL2: keep calibration and test logits of every epoch; the epoch is chosen on
+                # calibration only, after training.
+                zc = raw_logits(model, calib, tok.pad_token_id, device, amp)
+                zt = raw_logits(model, test, tok.pad_token_id, device, amp)
+                acc = float(np.mean([int(np.argmax(z)) == it["label"] for it, z in zip(calib, zc)]))
+                ce = float(np.mean([-np.log(softmax(z, 1.0)[it["label"]] + 1e-12) for it, z in zip(calib, zc)]))
+                tacc = float(np.mean([int(np.argmax(z)) == it["label"] for it, z in zip(test, zt)]))
+                snaps.append((e, acc, ce, zc, zt))
+                curve.append({"epoch": e, "calib_accuracy": acc, "calib_ce": ce, "test_accuracy": tacc})
+                print(f"  epoch {e} calib accuracy {acc:.3f} ce {ce:.4f} | test {tacc:.3f}", flush=True)
+            elif args.eval_each_epoch:
                 acc = float(np.mean([int(np.argmax(z)) == it["label"] for it, z in
                                      zip(calib, raw_logits(model, calib, tok.pad_token_id, device, amp))]))
                 curve.append({"epoch": e, "calib_accuracy": acc})
@@ -230,10 +241,20 @@ def run_job(args, rows, cond, fold, seed, device, amp):
         train(model, fit, tok, device, amp, seed, max_steps=2 if args.smoke else None,
               epochs=args.epochs, schedule=args.schedule, on_epoch=on_epoch)
         info.update(epochs=args.epochs, schedule=args.schedule, calib_curve=curve)
-        temp = fit_temperature(raw_logits(model, calib, tok.pad_token_id, device, amp), calib)
+        if args.early_stop:
+            # best calibration accuracy; ties -> lower calibration CE; ties -> earliest
+            e_best, _, _, zc, zt = min(snaps, key=lambda x: (-x[1], x[2], x[0]))
+            info["chosen_epoch"] = e_best
+            temp = fit_temperature(zc, calib)
+            chosen_test_logits = zt
+        else:
+            temp = fit_temperature(raw_logits(model, calib, tok.pad_token_id, device, amp), calib)
         info.update(n_train=len(fit), n_calib=len(calib),
                     truncated_train=sum(it["truncated"] for it in train_items))
-    logits = raw_logits(model, test, tok.pad_token_id, device, amp)
+    if not args.zero_shot and args.early_stop:
+        logits = chosen_test_logits
+    else:
+        logits = raw_logits(model, test, tok.pad_token_id, device, amp)
     info.update(truncated_test=sum(it["truncated"] for it in test),
                 max_tokens=max(it["n_tokens"] for it in test))
     out = os.path.join(args.out, f"{stem}__{cond}__fold{fold}.jsonl")
@@ -269,6 +290,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--schedule", choices=["cosine", "constant"], default="cosine")
     ap.add_argument("--eval-each-epoch", action="store_true", help="calibration-slice accuracy per epoch (DL1)")
+    ap.add_argument("--early-stop", action="store_true",
+                    help="DL2: evaluate every epoch, predict with the epoch best on calibration")
     ap.add_argument("--tag", default="", help="suffix for output names, e.g. e16")
     ap.add_argument("--control", action="store_true", help="positive control: the answer is in the state")
     ap.add_argument("--smoke", action="store_true", help="2 updates on 32 clips, to test the code")
