@@ -7,3 +7,4 @@ data/
 runs/
 # the root .gitignore ignores .env*; the template carries no secrets
 !.env.example
+.venv-laya/
