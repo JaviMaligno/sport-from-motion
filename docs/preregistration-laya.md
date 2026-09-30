@@ -183,3 +183,32 @@ entre semillas y el tiempo de GPU usado. Si Laya afinado no supera al azar, se d
 - **Por qué no se encadenan folds.** Arrancar un fold desde el modelo de otro filtraría
   test: el modelo del fold k se entrenó con clips que son test en los demás. Cada ajuste
   parte del checkpoint original.
+
+### DL2 (2026-09-30, POSTERIOR a los datos de la semilla 0 con E = 8). Parada temprana con validación interna
+
+- **Qué se vio.** Semilla 0 con DL1 (E = 8, `runs/laya/e8-s0`): acierto 0,22–0,34 por fold en las
+  cinco condiciones. En 24 de 25 ajustes la entropía cruzada **de entrenamiento** se queda en
+  ≈1,386 (= ln 4) las 8 épocas: el modelo no ajusta ni los clips que ve y colapsa a una clase o a
+  logits casi iguales. La excepción es `motion` fold 1, cuya entropía de entrenamiento baja en las
+  últimas épocas (1,38 → 1,16) y que acierta 0,34 en test. El control de DL1 midió cuánto tarda
+  en aprenderse una pista trivial, no una señal real; E = 8 puede quedarse corto para las
+  coordenadas.
+- **Qué se hace con DL1.** Se completa como estaba (semillas 1 y 2 con E = 8) y se informa
+  entero, con sus contrastes, como la configuración de DL1.
+- **Qué añade DL2.** Una configuración más, `laya-ft-es` (early stopping):
+  1. Planificador constante de DL1, hasta **32 épocas**, sin parada anticipada del proceso.
+  2. Al final de cada época se guardan los logits de la porción de calibración (el 10 % de
+     entrenamiento apartado, nunca test) y los del fold de test.
+  3. **Época elegida por fold y semilla:** la de mayor acierto en calibración; empate → menor
+     entropía cruzada en calibración; empate → la más temprana. El test de esa época es la
+     predicción. La temperatura se ajusta sobre la calibración de esa misma época.
+  4. Nada del fold de test interviene en la elección.
+- **Alcance.** Las condiciones de los contrastes primarios: `motion`, `motion_shuffled` y
+  `formation`, × 5 folds × semillas 0, 1 y 2 = 45 ajustes (≈66 min cada uno, ≈25 h de sesión
+  con dos GPU). `kinematics` y `kinematics_solo` quedan solo con DL1; se dice así.
+- **Análisis.** Los cuatro contrastes de la sección 5 para `laya-ft-es`, en su **propia**
+  familia de Holm (4 contrastes). Los de DL1 se informan también, en la suya. Además, sin
+  corrección: curva media de acierto de calibración y de test por época (descriptiva; el test por
+  época no elige nada).
+- **Qué no cambia.** Ítems, folds, conjunto de evaluación, pérdida, optimizador, lote efectivo,
+  estadístico y α.
