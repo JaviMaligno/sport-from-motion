@@ -56,7 +56,8 @@ print(f"exit codes {codes} | {time.time() - t0:.0f}s", flush=True)
 for f in sorted(glob.glob(f"{out}/*.info.json")):
     print(open(f).read().replace("\n", " "), flush=True)
 for g in range(n_gpu):
-    print(f"--- gpu{g}.log tail ---")
-    print("".join(open(f"{out}/gpu{g}.log").readlines()[-15:]))
+    if os.path.exists(f"{out}/gpu{g}.log"):
+        print(f"--- gpu{g}.log tail ---")
+        print("".join(open(f"{out}/gpu{g}.log").readlines()[-15:]))
 if any(codes):
     sys.exit(f"jobs failed: exit codes {codes}")

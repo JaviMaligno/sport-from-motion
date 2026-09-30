@@ -37,9 +37,15 @@ LR_ENCODER = 2.5e-5
 LR_HEAD = 1.0e-4
 SIGMA_START, SIGMA_END = 0.4, 0.1
 CALIB_FRACTION, CALIB_MAX = 10, 400
+CONTROL_TAGS = {"soccer": "Q7", "basketball": "M2", "american_football": "Z9", "handball": "R4"}
 
 
-def make_item(tok, cfg, row):
+def make_item(tok, cfg, row, control=False):
+    """`control` prepends an arbitrary tag that encodes the answer: a positive control of the
+    training code, not a condition. The tag carries no meaning, so the untuned model cannot
+    read it; only a model that learns the association during fine-tuning can use it."""
+    if control:
+        row = {**row, "state": f"tag: {CONTROL_TAGS[row['sport']]}\n" + row["state"]}
     crit = row["criteria"]
     keys = list(crit)
     q = {"t": "choice", "ins": row["instructions"], "crit": crit}
@@ -138,7 +144,7 @@ def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
         random.Random(seed * 1000 + epoch).shuffle(order)
         sigma = SIGMA_START + (SIGMA_END - SIGMA_START) * epoch / max(1, EPOCHS - 1)
         opt.zero_grad(set_to_none=True)
-        tot, nb = 0.0, 0
+        tot, tot_ce, nb = 0.0, 0.0, 0
         for b in range(0, len(order), MICRO_BATCH):
             batch = collate(order[b:b + MICRO_BATCH], tok.pad_token_id)
             logits, act = forward(model, batch, device, amp)
@@ -160,6 +166,7 @@ def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
             scaler.scale(loss).backward()
             nb += 1
             tot += loss.item() * GRAD_ACCUM
+            tot_ce += loss_ce.item()
             if nb % GRAD_ACCUM == 0 or b + MICRO_BATCH >= len(order):
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -171,7 +178,7 @@ def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
                 if max_steps and steps >= max_steps:
                     log(f"  smoke stop after {steps} updates, loss {tot / nb:.4f}")
                     return
-        log(f"  epoch {epoch + 1}/{EPOCHS} loss {tot / max(1, nb):.4f}")
+        log(f"  epoch {epoch + 1}/{EPOCHS} loss {tot / max(1, nb):.4f} ce {tot_ce / max(1, nb):.4f} updates {steps}")
 
 
 def softmax(z, t):
@@ -183,14 +190,16 @@ def run_job(args, rows, cond, fold, seed, device, amp):
     t0 = time.time()
     cfg, tok, model = load_base(args.model_dir, device)
     pool = [r for r in rows if r["condition"] == cond]
-    test = [make_item(tok, cfg, r) for r in pool if r["fold"] == fold]
+    test = [make_item(tok, cfg, r, args.control) for r in pool if r["fold"] == fold]
     name = "laya-zs" if args.zero_shot else "laya-ft"
     stem = "laya-zs" if args.zero_shot else f"laya-ft-s{seed}"
+    if args.control:
+        name, stem = name + "-control", stem.replace("laya-", "laya-control-")
     info = {"model": name, "condition": cond, "fold": fold, "seed": seed, "n_test": len(test)}
     if args.zero_shot:
         temp = float(cfg["temperature"][QTYPES["choice"]])
     else:
-        train_items = [make_item(tok, cfg, r) for r in pool if r["fold"] != fold]
+        train_items = [make_item(tok, cfg, r, args.control) for r in pool if r["fold"] != fold]
         idx = list(range(len(train_items)))
         random.Random(20260922 + seed).shuffle(idx)
         n_cal = min(CALIB_MAX, len(train_items) // CALIB_FRACTION)
@@ -235,6 +244,7 @@ def main():
     ap.add_argument("--jobs", required=True, help="condition:fold:seed, comma-separated")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--zero-shot", action="store_true")
+    ap.add_argument("--control", action="store_true", help="positive control: the answer is in the state")
     ap.add_argument("--smoke", action="store_true", help="2 updates on 32 clips, to test the code")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -243,7 +253,10 @@ def main():
     amp = device.type == "cuda"
     for job in args.jobs.split(","):
         cond, fold, seed = job.split(":")
-        done = os.path.join(args.out, f"{'laya-zs' if args.zero_shot else 'laya-ft-s' + seed}__{cond}__fold{fold}.info.json")
+        stem = "laya-zs" if args.zero_shot else "laya-ft-s" + seed
+        if args.control:
+            stem = stem.replace("laya-", "laya-control-")
+        done = os.path.join(args.out, f"{stem}__{cond}__fold{fold}.info.json")
         if os.path.exists(done):
             print(f"skip {job}: already done", flush=True)
             continue
