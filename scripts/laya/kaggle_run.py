@@ -53,6 +53,7 @@ for g in range(n_gpu):
         log = open(f"{out}/gpu{g}.log", "w")
         procs.append(subprocess.Popen(" && ".join(cmds), shell=True, env=env, stdout=log, stderr=subprocess.STDOUT))
 codes = [p.wait() for p in procs]
+shutil.rmtree(model_dir, ignore_errors=True)  # 647 MB that would otherwise ship with the output
 print(f"exit codes {codes} | {time.time() - t0:.0f}s", flush=True)
 for f in sorted(glob.glob(f"{out}/*.info.json")):
     print(open(f).read().replace("\n", " "), flush=True)
