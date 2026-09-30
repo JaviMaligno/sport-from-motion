@@ -175,6 +175,11 @@ entre semillas y el tiempo de GPU usado. Si Laya afinado no supera al azar, se d
   pre-registrado de b0 (`motion`, semilla 0: colapso al azar) junto al control. No se
   completan sus otros 70 ajustes: sabemos que está infraentrenada y costarían ≈6 h de
   cuota para confirmarlo.
+- **Resultado del barrido** (2026-09-30, `runs/laya/sweep`, antes de correr ningún ajuste
+  con la configuración nueva). Acierto del control en la porción de calibración por época:
+  fold 0: 0,25 · 0,45 · 0,47 · 0,43 · 0,50 · 0,76 · 0,94 · **1,00 (época 8)** y 1,00 hasta
+  la 32; fold 1: 0,78 · **1,00 (época 2)** y 1,00 hasta la 32. **E = 8.** Etiqueta de las
+  salidas: `laya-ft-e8`. Tiempo ≈ 2 min por época en una T4 (≈17 min por ajuste).
 - **Por qué no se encadenan folds.** Arrancar un fold desde el modelo de otro filtraría
   test: el modelo del fold k se entrenó con clips que son test en los demás. Cada ajuste
   parte del checkpoint original.
