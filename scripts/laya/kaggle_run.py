@@ -32,6 +32,8 @@ out = "/kaggle/working/out"
 os.makedirs(out, exist_ok=True)
 n_gpu = torch.cuda.device_count()
 print(f"GPUs: {n_gpu} | torch {torch.__version__} | items {items}", flush=True)
+if n_gpu == 0:
+    sys.exit("no GPU in this session: Kaggle only grants GPUs to phone-verified accounts")
 
 ft = [j for j in FT_JOBS.split(",") if j]
 zs = [j for j in ZS_JOBS.split(",") if j]
