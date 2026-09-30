@@ -125,7 +125,11 @@ def load_base(model_dir, device):
     return cfg, tok, model.to(device)
 
 
-def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
+def train(model, items, tok, device, amp, seed, max_steps=None, log=print, epochs=EPOCHS,
+          schedule="cosine", on_epoch=None):
+    """`schedule="cosine"` is the notebook's. `"constant"` (DL1) keeps the initial learning
+    rates and anneals sigma over the notebook's first 4 epochs only, so the model after epoch
+    E does not depend on the total and one long run yields every shorter budget."""
     torch.manual_seed(seed)
     model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.head_checkpointing = True
@@ -134,15 +138,17 @@ def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
     head = [p for n, p in model.named_parameters() if not n.startswith("encoder.")]
     opt = torch.optim.AdamW([{"params": enc, "lr": LR_ENCODER}, {"params": head, "lr": LR_HEAD}],
                             weight_decay=0.01)
-    total = max(1, (len(items) // (MICRO_BATCH * GRAD_ACCUM)) * EPOCHS)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=total, eta_min=1e-6)
+    total = max(1, (len(items) // (MICRO_BATCH * GRAD_ACCUM)) * epochs)
+    sched = (torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=total, eta_min=1e-6)
+             if schedule == "cosine" else torch.optim.lr_scheduler.LambdaLR(opt, lambda _: 1.0))
     scaler = (torch.amp.GradScaler(device.type, enabled=amp) if hasattr(torch.amp, "GradScaler")
               else torch.cuda.amp.GradScaler(enabled=amp))
     order = list(items)
     steps = 0
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         random.Random(seed * 1000 + epoch).shuffle(order)
-        sigma = SIGMA_START + (SIGMA_END - SIGMA_START) * epoch / max(1, EPOCHS - 1)
+        span = epochs if schedule == "cosine" else EPOCHS
+        sigma = SIGMA_START + (SIGMA_END - SIGMA_START) * min(1.0, epoch / max(1, span - 1))
         opt.zero_grad(set_to_none=True)
         tot, tot_ce, nb = 0.0, 0.0, 0
         for b in range(0, len(order), MICRO_BATCH):
@@ -178,7 +184,10 @@ def train(model, items, tok, device, amp, seed, max_steps=None, log=print):
                 if max_steps and steps >= max_steps:
                     log(f"  smoke stop after {steps} updates, loss {tot / nb:.4f}")
                     return
-        log(f"  epoch {epoch + 1}/{EPOCHS} loss {tot / max(1, nb):.4f} ce {tot_ce / max(1, nb):.4f} updates {steps}")
+        log(f"  epoch {epoch + 1}/{epochs} loss {tot / max(1, nb):.4f} ce {tot_ce / max(1, nb):.4f} updates {steps}")
+        if on_epoch:
+            on_epoch(epoch + 1)
+            model.train()
 
 
 def softmax(z, t):
@@ -193,6 +202,8 @@ def run_job(args, rows, cond, fold, seed, device, amp):
     test = [make_item(tok, cfg, r, args.control) for r in pool if r["fold"] == fold]
     name = "laya-zs" if args.zero_shot else "laya-ft"
     stem = "laya-zs" if args.zero_shot else f"laya-ft-s{seed}"
+    if args.tag and not args.zero_shot:
+        name, stem = f"{name}-{args.tag}", stem.replace("laya-ft-", f"laya-ft-{args.tag}-")
     if args.control:
         name, stem = name + "-control", stem.replace("laya-", "laya-control-")
     info = {"model": name, "condition": cond, "fold": fold, "seed": seed, "n_test": len(test)}
@@ -207,7 +218,18 @@ def run_job(args, rows, cond, fold, seed, device, amp):
         fit = [train_items[i] for i in sorted(idx[n_cal:])]
         if args.smoke:
             fit, calib, test = fit[:32], calib[:16], test[:16]
-        train(model, fit, tok, device, amp, seed, max_steps=2 if args.smoke else None)
+        curve = []
+
+        def on_epoch(e):
+            if args.eval_each_epoch:
+                acc = float(np.mean([int(np.argmax(z)) == it["label"] for it, z in
+                                     zip(calib, raw_logits(model, calib, tok.pad_token_id, device, amp))]))
+                curve.append({"epoch": e, "calib_accuracy": acc})
+                print(f"  epoch {e} calib accuracy {acc:.3f}", flush=True)
+
+        train(model, fit, tok, device, amp, seed, max_steps=2 if args.smoke else None,
+              epochs=args.epochs, schedule=args.schedule, on_epoch=on_epoch)
+        info.update(epochs=args.epochs, schedule=args.schedule, calib_curve=curve)
         temp = fit_temperature(raw_logits(model, calib, tok.pad_token_id, device, amp), calib)
         info.update(n_train=len(fit), n_calib=len(calib),
                     truncated_train=sum(it["truncated"] for it in train_items))
@@ -244,6 +266,10 @@ def main():
     ap.add_argument("--jobs", required=True, help="condition:fold:seed, comma-separated")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--zero-shot", action="store_true")
+    ap.add_argument("--epochs", type=int, default=EPOCHS)
+    ap.add_argument("--schedule", choices=["cosine", "constant"], default="cosine")
+    ap.add_argument("--eval-each-epoch", action="store_true", help="calibration-slice accuracy per epoch (DL1)")
+    ap.add_argument("--tag", default="", help="suffix for output names, e.g. e16")
     ap.add_argument("--control", action="store_true", help="positive control: the answer is in the state")
     ap.add_argument("--smoke", action="store_true", help="2 updates on 32 clips, to test the code")
     args = ap.parse_args()
@@ -254,6 +280,8 @@ def main():
     for job in args.jobs.split(","):
         cond, fold, seed = job.split(":")
         stem = "laya-zs" if args.zero_shot else "laya-ft-s" + seed
+        if args.tag and not args.zero_shot:
+            stem = stem.replace("laya-ft-", f"laya-ft-{args.tag}-")
         if args.control:
             stem = stem.replace("laya-", "laya-control-")
         done = os.path.join(args.out, f"{stem}__{cond}__fold{fold}.info.json")

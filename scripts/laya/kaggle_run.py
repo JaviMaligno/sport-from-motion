@@ -12,6 +12,7 @@ import time
 
 FT_JOBS = os.environ.get("FT_JOBS", "")
 ZS_JOBS = os.environ.get("ZS_JOBS", "")
+FT_EXTRA = os.environ.get("FT_EXTRA", "")  # e.g. "--epochs 16 --schedule constant --tag e16" (DL1)
 REVISION = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
 
 # Offline: the kernel has no DNS, so wheels and checkpoint come from a private dataset
@@ -44,7 +45,7 @@ for g in range(n_gpu):
     base = f"{sys.executable} {script} --items {items} --model-dir {model_dir} --out {out} --device cuda:0"
     cmds = []
     if mine_ft:
-        cmds.append(f"{base} --jobs {','.join(mine_ft)}")
+        cmds.append(f"{base} {FT_EXTRA} --jobs {','.join(mine_ft)}")
     if mine_zs:
         cmds.append(f"{base} --zero-shot --jobs {','.join(mine_zs)}")
     if cmds:
