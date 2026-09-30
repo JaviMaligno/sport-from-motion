@@ -141,4 +141,40 @@ entre semillas y el tiempo de GPU usado. Si Laya afinado no supera al azar, se d
 
 ## 9. Desviaciones
 
-(ninguna todavía)
+### DL1 (2026-09-30, POSTERIOR a los datos de un lote). Presupuesto de entrenamiento
+
+- **Qué se vio.** Lote b0 (Kaggle 2×T4): `motion`, semilla 0, 5 folds, con la
+  configuración de la sección 4. Acierto 0,235–0,270 por fold; la pérdida no baja de
+  ≈1,3 y la cabeza acaba dando el mismo logit a las cuatro opciones (rango medio dentro
+  de cada fila 0,01, frente a 0,62 sin afinar). Tiempo: ≈9,5 min por ajuste en una T4.
+  Laya sin afinar, las 5 condiciones × 5 folds: 0,21–0,30.
+- **Control positivo** (`train.py --control`): el mismo fold 0 de `motion` con una
+  etiqueta arbitraria por deporte al principio del estado (`tag: Q7`, …; sin significado,
+  el modelo sin afinar acierta 0,24). Con la configuración de la sección 4 la
+  entropía cruzada va 1,44 → 1,38 → 0,74 → 0,54 por época y el acierto final es 0,72.
+  El código entrena; el presupuesto de 4 épocas × ≈1.100 clips = 72 actualizaciones
+  (pensado para ≈30.000 ejemplos) no basta ni para aprender una pista perfecta. El
+  colapso de b0 no se puede leer como «Laya no ve el movimiento».
+- **Qué cambia.**
+  1. **Planificador.** Tasa de aprendizaje constante en los valores iniciales del
+     notebook (2,5e-5 codificador, 1e-4 cabeza) en vez de coseno; σ baja 0,4 → 0,1 en
+     las 4 primeras épocas, como en el notebook, y se queda en 0,1. Así el modelo tras
+     la época E es el mismo que si se hubiera entrenado E épocas, y el barrido cabe en
+     una sola corrida.
+  2. **Épocas, elegidas con el control y sin tocar el test.** Una corrida de 32 épocas
+     del control en los folds 0 y 1 de `motion` (semilla 0). Al final de cada época se
+     mide el acierto en la porción de calibración (el 10 % de entrenamiento apartado),
+     nunca en el fold de test. **E = la primera época en que el control llega a ≥ 0,95
+     en los dos folds.** Si ninguna lo consigue en 32, E = 32 y se dice.
+  3. Con E fijado, se corre el diseño completo de la sección 4 (5 condiciones × 5 folds
+     × 3 semillas) con el planificador constante y E épocas. Análisis de la sección 5
+     sin cambios.
+- **Qué no cambia.** Ítems, folds, conjunto de evaluación, pérdida, optimizador, lote
+  efectivo, calibración, contrastes, familia y α.
+- **Lo que se informa.** La configuración original (sección 4) queda como resultado
+  pre-registrado de b0 (`motion`, semilla 0: colapso al azar) junto al control. No se
+  completan sus otros 70 ajustes: sabemos que está infraentrenada y costarían ≈6 h de
+  cuota para confirmarlo.
+- **Por qué no se encadenan folds.** Arrancar un fold desde el modelo de otro filtraría
+  test: el modelo del fold k se entrenó con clips que son test en los demás. Cada ajuste
+  parte del checkpoint original.
