@@ -15,7 +15,8 @@ ZS_JOBS = os.environ.get("ZS_JOBS", "")
 REVISION = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
 
 # Offline: the kernel has no DNS, so wheels and checkpoint come from a private dataset
-# (laya 0.3.22, transformers 4.48.3, tokenizers 0.21.4; checkpoint at revision REVISION).
+# (laya 0.3.22, transformers 4.48.3, tokenizers 0.21.4, huggingface_hub 0.36.2 --
+# the image ships huggingface_hub 1.x, which transformers 4.48 refuses; checkpoint at revision REVISION).
 wheels = glob.glob("/kaggle/input/**/wheels/*.whl", recursive=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "--no-index", *wheels], check=True)
 import shutil  # noqa: E402
@@ -57,3 +58,5 @@ for f in sorted(glob.glob(f"{out}/*.info.json")):
 for g in range(n_gpu):
     print(f"--- gpu{g}.log tail ---")
     print("".join(open(f"{out}/gpu{g}.log").readlines()[-15:]))
+if any(codes):
+    sys.exit(f"jobs failed: exit codes {codes}")
