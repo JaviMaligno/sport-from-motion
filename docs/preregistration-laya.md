@@ -153,7 +153,10 @@ entre semillas y el tiempo de GPU usado. Si Laya afinado no supera al azar, se d
   el modelo sin afinar acierta 0,24). Con la configuración de la sección 4 la
   entropía cruzada va 1,44 → 1,38 → 0,74 → 0,54 por época y el acierto final es 0,72.
   El código entrena; el presupuesto de 4 épocas × ≈1.100 clips = 72 actualizaciones
-  (pensado para ≈30.000 ejemplos) no basta ni para aprender una pista perfecta. El
+  (pensado para ≈30.000 ejemplos) no basta ni para aprender una pista perfecta.
+  *Nota (2026-10-05): el notebook afina con 1.200 casos, ≈6.000 decisiones (≈375
+  actualizaciones), no ≈30.000. No cambia nada de lo decidido: la regla de DL1 se fijó con el
+  control, no con esa cifra.* El
   colapso de b0 no se puede leer como «Laya no ve el movimiento».
 - **Qué cambia.**
   1. **Planificador.** Tasa de aprendizaje constante en los valores iniciales del

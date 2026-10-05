@@ -101,6 +101,9 @@ semilla 2, `motion`, folds 0–3).
 | Frente a | d | IC 95 % | p |
 |---|---|---|---|
 | Jev (texto) | +0,11 | [−0,04; 0,25] | 0,15 |
+| Claude Opus 5.5 (texto) | −0,16 | [−0,30; −0,03] | 0,011 |
+| Gemini 3.1 Pro (texto) | −0,06 | [−0,19; 0,05] | 0,30 |
+| Claude Sonnet 5 (texto, A17) | +0,01 | [−0,11; 0,12] | 0,91 |
 | gpt-5.6-sol (texto) | −0,06 | [−0,14; 0,02] | 0,14 |
 | gpt-5.6-terra (texto) | −0,01 | [−0,11; 0,09] | 0,92 |
 | DeepSets | −0,45 | [−0,51; −0,38] | 0,0002 |
@@ -111,10 +114,14 @@ semilla 2, `motion`, folds 0–3).
 - Un modelo de 322M afinado con ~1.100 clips por fold extrae del texto de coordenadas algo que
   depende del orden temporal: el efecto `order` (+0,08) es del mismo orden que el de Opus 5.5
   en imagen (+0,10), el único modelo de frontera que lo mostró.
-- En acierto queda a la altura de los modelos que leyeron el mismo texto (Jev 0,25,
-  gpt-5.6-terra 0,37, gpt-5.6-sol 0,42; ninguna diferencia significativa) y muy por debajo
-  de los especialistas sobre coordenadas (MiniRocket ≈0,84 en los mismos 400 clips).
-- El presupuesto del notebook (pensado para ≈30.000 ejemplos) no basta con ~1.100: con 4 u 8
+- En acierto (0,36) queda a la altura de los modelos de frontera que leyeron el mismo texto
+  (GPT-5.6 Sol 0,41, Terra 0,36, Sonnet 5 0,35 en la versión A17, Gemini 3.1 Pro 0,42; ninguna
+  diferencia significativa), por debajo de Opus 5.5 en texto (0,52; d −0,16 [−0,30; −0,03],
+  p 0,011 sin corregir) y de los especialistas (MiniRocket 0,83, DeepSets 0,80, en los mismos
+  400 clips). Frente a Jev, +0,11 [−0,04; 0,25], p 0,15.
+- En el efecto del orden queda con MiniRocket (+0,12) y Opus 5.5 en imagen (+0,10); los otros
+  cuatro modelos de frontera (imagen) y Jev (texto) están entre −0,02 y +0,01.
+- El presupuesto del notebook (1.200 casos, ≈6.000 decisiones, ≈375 actualizaciones) no basta con ~1.100 ejemplos (72 actualizaciones): con 4 u 8
   épocas el resultado es el azar y no dice nada del modelo. Incluso con 32 épocas, un tercio
   de los ajustes de `motion` no despega.
 - El balonmano y el fútbol siguen siendo los difíciles, como en el experimento principal.
